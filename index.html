@@ -301,7 +301,7 @@
   </div>
 
   <p id="ios-hint">Sur iPhone, une permission gyroscope sera demandée.</p>
-  <p style="font-size:11px;opacity:0.3;letter-spacing:1px">← TOUCHES DIRECTIONNELLES SUR ORDINATEUR →</p>
+  <p style="font-size:11px;opacity:0.55;letter-spacing:1px;margin-top:8px">Un jeu sur smartphone, par Sébastien Dumortier</p>
 </div>
 
 <!-- RECORDS SCREEN -->
@@ -501,7 +501,6 @@ let W, H;
 let marble = { x:0, y:0, vx:0, vy:0, r: MARBLE_R };
 let holes  = [];
 let tiltX  = 0, tiltY = 0;
-let keysDown = {};
 let running  = false;
 let levelStartTime;     // performance.now() au début du niveau
 let levelElapsed = 0;   // temps du niveau en cours
@@ -850,15 +849,6 @@ function drawMarbleAt(x, y, r) {
 function physics() {
   if (!running || sinkHole) return;
 
-  // Keyboard fallback
-  const KB = 0.6;
-  if (keysDown['ArrowLeft'])  tiltX = -KB;
-  if (keysDown['ArrowRight']) tiltX =  KB;
-  if (keysDown['ArrowUp'])    tiltY = -KB;
-  if (keysDown['ArrowDown'])  tiltY =  KB;
-  if (!keysDown['ArrowLeft'] && !keysDown['ArrowRight']) tiltX *= 0.85;
-  if (!keysDown['ArrowUp']   && !keysDown['ArrowDown'])  tiltY *= 0.85;
-
   // Apply tilt
   marble.vx += tiltX * GRAVITY;
   marble.vy += tiltY * GRAVITY;
@@ -1062,8 +1052,6 @@ document.getElementById('btn-restart-lose').addEventListener('click', () => {
   showScreen('start');
 });
 
-document.addEventListener('keydown', e => { keysDown[e.key] = true;  });
-document.addEventListener('keyup',   e => { keysDown[e.key] = false; });
 
 window.addEventListener('resize', () => {
   if (running) {
@@ -1075,22 +1063,6 @@ window.addEventListener('resize', () => {
   }
 });
 
-// Contrôle souris (ordinateur)
-canvas.addEventListener('mousemove', (e) => {
-  if (!running) return;
-  const rect = canvas.getBoundingClientRect();
-  const cx = rect.left + W / 2;
-  const cy = rect.top  + H / 2;
-  const dx = (e.clientX - cx) / (W / 2);
-  const dy = (e.clientY - cy) / (H / 2);
-  // Only if no keyboard pressed
-  if (!Object.values(keysDown).some(Boolean)) {
-    tiltX = dx * 0.8;
-    tiltY = dy * 0.8;
-  }
-});
-
-canvas.addEventListener('mouseleave', () => { tiltX = 0; tiltY = 0; });
 
 // ════════════════════════════════════════════════
 //  INIT
