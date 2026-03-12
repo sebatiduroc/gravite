@@ -488,7 +488,7 @@ const MAX_LEVEL = 15;
 
 // ── Config par niveau ──
 function redHoleCount(lvl) {
-  if (lvl <= 4) return 4 + lvl;  // 5,6,7,8
+  if (lvl <= 4) return 4 + lvl;
   return 5;
 }
 function movingRedCount(lvl) {
@@ -497,16 +497,23 @@ function movingRedCount(lvl) {
   if (lvl <= 8) return lvl - 4;
   return 5;
 }
-function greenMoves(lvl)    { return lvl >= 10; }
-function levelUseBigRed(lvl){ return lvl <= 10 || lvl === 12 || lvl === 14 || lvl === 15; }
-function squareCount(lvl)   {
-  if (lvl >= 11 && lvl <= 12) return 1;
-  if (lvl >= 13 && lvl <= 14) return 2;
-  if (lvl === 15)              return 3;
+function greenMoves(lvl) { return lvl >= 10; }
+// Niveaux 11-15 : toujours 5 petits trous mobiles
+// Carrés : 11-13 → 1 carré, 14-15 → 2 carrés
+function squareCount(lvl) {
+  if (lvl >= 11 && lvl <= 13) return 1;
+  if (lvl >= 14)              return 2;
   return 0;
 }
-// Taille du carré obstacle (côté)
-const SQUARE_SIZE = 80;
+const SQUARE_SIZE = 90;
+// Vitesse rotation (rad/frame)
+const ROT_SPEED_12 = 0.012;  // niv 12 : tourne sur place
+const ROT_SPEED_13 = 0.018;  // niv 13 : tourne en se déplaçant
+const ROT_SPEED_14 = 0.022;  // niv 14 : 2 carrés, vitesses variées
+// Niveau 15 : trou vert clignotant
+const GREEN_SHOW_DELAY = 5;   // secondes avant apparition
+const GREEN_SHOW_DUR   = 10;  // secondes visible
+const GREEN_CYCLE      = GREEN_SHOW_DELAY + GREEN_SHOW_DUR; // 15s par cycle
 
 // ════════════════════════════════════════════════
 //  STATE
@@ -517,7 +524,9 @@ const ctx    = canvas.getContext('2d');
 let W, H;
 let marble = { x:0, y:0, vx:0, vy:0, r: MARBLE_R };
 let holes   = [];
-let squares = [];  // obstacles carrés { x, y, size }
+let squares = [];  // obstacles carrés { x, y, size, angle, vx, vy, rotSpeed }
+let greenVisible = true;   // niveau 15 : trou vert clignotant
+let greenTimer   = 0;      // temps écoulé depuis début du niveau (secondes)
 let tiltX  = 0, tiltY = 0;
 let running  = false;
 let levelStartTime;     // performance.now() au début du niveau
@@ -561,9 +570,13 @@ function dist(a, b) {
 }
 
 function insideSquare(x, y, r, sq) {
-  // Teste si un cercle (x,y,r) chevauche un carré
+  // Teste si un cercle chevauche un carré (espace local, rotation prise en compte)
+  const cos = Math.cos(-sq.angle), sin = Math.sin(-sq.angle);
+  const dx = x - sq.x, dy = y - sq.y;
+  const lx = Math.abs(dx * cos - dy * sin);
+  const ly = Math.abs(dx * sin + dy * cos);
   const half = sq.size / 2 + r + 4;
-  return Math.abs(x - sq.x) < half && Math.abs(y - sq.y) < half;
+  return lx < half && ly < half;
 }
 
 function placeHole(r, type) {
@@ -620,26 +633,31 @@ function placeGreenHole(r) {
   return { x: bestCandidate.x, y: bestCandidate.y, r, type: 'green', moving: false, vx: 0, vy: 0 };
 }
 
-// Place les carrés obstacles pour les niveaux 11-15
 function generateSquares(lvl) {
   squares = [];
   const n = squareCount(lvl);
   if (n === 0) return;
   const s = SQUARE_SIZE;
-  const margin = s / 2 + MARBLE_R + 10;
 
-  if (n === 1) {
-    // Un carré au centre
-    squares.push({ x: W / 2, y: H / 2, size: s });
-  } else if (n === 2) {
-    // Deux carrés côte à côte, laissant un couloir haut et bas
-    squares.push({ x: W * 0.33, y: H / 2, size: s });
-    squares.push({ x: W * 0.67, y: H / 2, size: s });
-  } else if (n === 3) {
-    // Triangle : un en haut centre, deux en bas
-    squares.push({ x: W / 2,    y: H * 0.33, size: s });
-    squares.push({ x: W * 0.28, y: H * 0.67, size: s });
-    squares.push({ x: W * 0.72, y: H * 0.67, size: s });
+  if (lvl === 11) {
+    // Carré fixe au centre
+    squares.push({ x: W/2, y: H/2, size: s, angle: 0, vx: 0, vy: 0, rotSpeed: 0 });
+
+  } else if (lvl === 12) {
+    // Carré qui tourne sur place au centre
+    squares.push({ x: W/2, y: H/2, size: s, angle: 0, vx: 0, vy: 0, rotSpeed: ROT_SPEED_12 });
+
+  } else if (lvl === 13) {
+    // Carré qui tourne ET se déplace
+    const v = seededVelocity(0.8);
+    squares.push({ x: W/2, y: H/2, size: s, angle: 0, vx: v.vx, vy: v.vy, rotSpeed: ROT_SPEED_13 });
+
+  } else if (lvl >= 14) {
+    // 2 carrés qui tournent en se déplaçant, vitesses et sens opposés
+    const v1 = seededVelocity(0.7);
+    const v2 = seededVelocity(0.9);
+    squares.push({ x: W*0.3, y: H*0.4, size: s, angle: 0,        vx: v1.vx, vy: v1.vy, rotSpeed:  ROT_SPEED_14 });
+    squares.push({ x: W*0.7, y: H*0.6, size: s, angle: Math.PI/4, vx: v2.vx, vy: v2.vy, rotSpeed: -ROT_SPEED_14 });
   }
 }
 
@@ -732,58 +750,36 @@ function generateLevel(lvl) {
       holes.push(h); sp++;
     }
 
-  } else if (lvl === 11) {
-    // ── Niveau 11 : 4 petits + 1 grand, tous mobiles, 1 carré ──
-    const bigH = placeHole(HOLE_BIG, 'red');
-    if (bigH) { const v = seededVelocity(speed); bigH.moving = true; bigH.vx = v.vx; bigH.vy = v.vy; holes.push(bigH); }
-    for (let i = 0; i < 4; i++) {
-      const h = placeHole(HOLE_R, 'red');
-      if (!h) break;
-      const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; holes.push(h);
-    }
-
-  } else if (lvl === 12) {
-    // ── Niveau 12 : 5 grands trous mobiles, 1 carré ──
-    for (let i = 0; i < 5; i++) {
-      const h = placeHole(HOLE_BIG, 'red');
-      if (!h) break;
-      const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; holes.push(h);
-    }
-
-  } else if (lvl === 13) {
-    // ── Niveau 13 : 5 petits trous mobiles, 2 carrés ──
+  } else if (lvl >= 11) {
+    // ── Niveaux 11-15 : toujours 5 petits trous rouges mobiles ──
     for (let i = 0; i < 5; i++) {
       const h = placeHole(HOLE_R, 'red');
-      if (!h) break;
-      const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; holes.push(h);
-    }
-
-  } else if (lvl === 14) {
-    // ── Niveau 14 : 5 grands trous mobiles, 2 carrés ──
-    for (let i = 0; i < 5; i++) {
-      const h = placeHole(HOLE_BIG, 'red');
-      if (!h) break;
-      const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; holes.push(h);
-    }
-
-  } else if (lvl === 15) {
-    // ── Niveau 15 : 5 grands trous mobiles, 3 carrés ──
-    for (let i = 0; i < 5; i++) {
-      const h = placeHole(HOLE_BIG, 'red');
       if (!h) break;
       const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; holes.push(h);
     }
   }
 
-  // Trou vert — stratégiquement placé selon le niveau
+  // ── Trou vert ──
   const greenR = HOLE_R + 2;
-  const gh = lvl >= 11 ? placeGreenHoleLvl(greenR, lvl) : placeGreenHole(greenR);
-  if (gh) {
-    if (greenMoves(lvl)) {
+  greenVisible = true;
+  greenTimer   = 0;
+
+  if (lvl >= 11) {
+    // Placé de l'autre côté du/des carré(s)
+    const gh = placeGreenHoleLvl(greenR, lvl);
+    if (gh) {
+      // Toujours mobile aux niveaux 11-15
       const gv = seededVelocity(0.9);
       gh.moving = true; gh.vx = gv.vx; gh.vy = gv.vy;
+      if (lvl === 15) gh.hidden = true; // démarre caché au niv 15
+      holes.push(gh);
     }
-    holes.push(gh);
+  } else {
+    const gh = placeGreenHole(greenR);
+    if (gh) {
+      if (greenMoves(lvl)) { const gv = seededVelocity(0.9); gh.moving = true; gh.vx = gv.vx; gh.vy = gv.vy; }
+      holes.push(gh);
+    }
   }
 }
 
@@ -802,22 +798,28 @@ function moveHoles() {
     if (h.y > H - m) { h.y = H - m; h.vy = -Math.abs(h.vy); }
   }
 
-  // Rebonds trous mobiles sur les carrés obstacles
+  // Rebonds trous mobiles sur les carrés (espace local)
   for (const h of moving) {
     for (const sq of squares) {
+      const cos = Math.cos(-sq.angle), sin = Math.sin(-sq.angle);
+      const gdx = h.x - sq.x, gdy = h.y - sq.y;
+      const lx = gdx * cos - gdy * sin;
+      const ly = gdx * sin + gdy * cos;
       const half = sq.size / 2 + h.r;
-      const dx = h.x - sq.x;
-      const dy = h.y - sq.y;
-      if (Math.abs(dx) < half && Math.abs(dy) < half) {
-        const ox = half - Math.abs(dx);
-        const oy = half - Math.abs(dy);
-        if (ox < oy) {
-          h.x += dx > 0 ? ox : -ox;
-          h.vx *= -1;
-        } else {
-          h.y += dy > 0 ? oy : -oy;
-          h.vy *= -1;
-        }
+      if (Math.abs(lx) < half && Math.abs(ly) < half) {
+        const ox = half - Math.abs(lx), oy = half - Math.abs(ly);
+        let nx, ny;
+        if (ox < oy) { nx = lx > 0 ? 1 : -1; ny = 0; }
+        else         { nx = 0; ny = ly > 0 ? 1 : -1; }
+        const overlap = Math.min(ox, oy);
+        const cosA = Math.cos(sq.angle), sinA = Math.sin(sq.angle);
+        const wnx = nx * cosA - ny * sinA;
+        const wny = nx * sinA + ny * cosA;
+        h.x += wnx * overlap;
+        h.y += wny * overlap;
+        const vn = h.vx * wnx + h.vy * wny;
+        h.vx -= 2 * vn * wnx;
+        h.vy -= 2 * vn * wny;
       }
     }
   }
@@ -885,7 +887,8 @@ function resetMarble() {
   marble.vy = 0;
   sinkHole     = null;
   sinkProgress = 0;
-  // squares est géré par generateLevel, pas besoin de reset ici
+  greenTimer   = 0;
+  greenVisible = true;
 }
 
 // ════════════════════════════════════════════════
@@ -918,6 +921,24 @@ function buildWoodPattern() {
 // ════════════════════════════════════════════════
 //  DRAW
 // ════════════════════════════════════════════════
+function moveSquares() {
+  for (const sq of squares) {
+    // Rotation
+    sq.angle = (sq.angle + sq.rotSpeed) % (Math.PI * 2);
+
+    // Déplacement
+    if (sq.vx !== 0 || sq.vy !== 0) {
+      sq.x += sq.vx;
+      sq.y += sq.vy;
+      const m = sq.size * 0.7; // rayon englobant approx
+      if (sq.x < m)     { sq.x = m;     sq.vx =  Math.abs(sq.vx); }
+      if (sq.x > W - m) { sq.x = W - m; sq.vx = -Math.abs(sq.vx); }
+      if (sq.y < m)     { sq.y = m;     sq.vy =  Math.abs(sq.vy); }
+      if (sq.y > H - m) { sq.y = H - m; sq.vy = -Math.abs(sq.vy); }
+    }
+  }
+}
+
 function drawBoard() {
   ctx.fillStyle = woodPattern || '#c49550';
   ctx.fillRect(0, 0, W, H);
@@ -934,38 +955,43 @@ function drawSquares() {
   for (const sq of squares) {
     const half = sq.size / 2;
     ctx.save();
-    // Ombre portée
+    ctx.translate(sq.x, sq.y);
+    ctx.rotate(sq.angle);
+
+    // Ombre
     ctx.shadowColor = 'rgba(0,0,0,0.6)';
     ctx.shadowBlur  = 14;
     ctx.shadowOffsetY = 4;
 
-    // Corps du carré — bois sombre avec grain
-    const grad = ctx.createLinearGradient(sq.x - half, sq.y - half, sq.x + half, sq.y + half);
+    // Corps bois
+    const grad = ctx.createLinearGradient(-half, -half, half, half);
     grad.addColorStop(0,   '#5a3a18');
     grad.addColorStop(0.4, '#7a5228');
     grad.addColorStop(0.6, '#6a4420');
     grad.addColorStop(1,   '#3e2410');
     ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.rect(sq.x - half, sq.y - half, sq.size, sq.size);
+    ctx.rect(-half, -half, sq.size, sq.size);
     ctx.fill();
-    ctx.restore();
 
     // Bordure dorée
+    ctx.shadowColor = 'transparent';
     ctx.beginPath();
-    ctx.rect(sq.x - half, sq.y - half, sq.size, sq.size);
-    ctx.strokeStyle = 'rgba(180,120,40,0.7)';
+    ctx.rect(-half, -half, sq.size, sq.size);
+    ctx.strokeStyle = 'rgba(180,120,40,0.8)';
     ctx.lineWidth = 3;
     ctx.stroke();
 
-    // Reflet bord haut/gauche
+    // Reflet haut-gauche
     ctx.beginPath();
-    ctx.moveTo(sq.x - half + 2, sq.y + half - 2);
-    ctx.lineTo(sq.x - half + 2, sq.y - half + 2);
-    ctx.lineTo(sq.x + half - 2, sq.y - half + 2);
-    ctx.strokeStyle = 'rgba(255,200,100,0.15)';
+    ctx.moveTo(-half + 2,  half - 2);
+    ctx.lineTo(-half + 2, -half + 2);
+    ctx.lineTo( half - 2, -half + 2);
+    ctx.strokeStyle = 'rgba(255,200,100,0.18)';
     ctx.lineWidth = 2;
     ctx.stroke();
+
+    ctx.restore();
   }
 }
 
@@ -1082,32 +1108,43 @@ function physics() {
   if (marble.y < pad)     { marble.y = pad;      marble.vy *= -0.5; }
   if (marble.y > H - pad) { marble.y = H - pad;  marble.vy *= -0.5; }
 
-  // Square obstacle collision (rebond élastique sur les faces)
+  // Square obstacle collision en espace local (rotation prise en compte)
   for (const sq of squares) {
+    const cos = Math.cos(-sq.angle), sin = Math.sin(-sq.angle);
+    const gdx = marble.x - sq.x, gdy = marble.y - sq.y;
+    // Coordonnées locales au carré
+    const lx = gdx * cos - gdy * sin;
+    const ly = gdx * sin + gdy * cos;
     const half = sq.size / 2 + marble.r;
-    const dx = marble.x - sq.x;
-    const dy = marble.y - sq.y;
-    if (Math.abs(dx) < half && Math.abs(dy) < half) {
-      // Pénétration sur chaque axe
-      const ox = half - Math.abs(dx);
-      const oy = half - Math.abs(dy);
+    if (Math.abs(lx) < half && Math.abs(ly) < half) {
+      const ox = half - Math.abs(lx);
+      const oy = half - Math.abs(ly);
+      // Axe de moindre pénétration en local → repasser en monde
+      let nx, ny;
       if (ox < oy) {
-        // Rebond horizontal
-        marble.x += dx > 0 ? ox : -ox;
-        marble.vx *= -0.6;
+        nx = lx > 0 ? 1 : -1; ny = 0;
       } else {
-        // Rebond vertical
-        marble.y += dy > 0 ? oy : -oy;
-        marble.vy *= -0.6;
+        nx = 0; ny = ly > 0 ? 1 : -1;
       }
+      const overlap = ox < oy ? ox : oy;
+      // Repasser en espace monde
+      const cosA = Math.cos(sq.angle), sinA = Math.sin(sq.angle);
+      const wnx = nx * cosA - ny * sinA;
+      const wny = nx * sinA + ny * cosA;
+      marble.x += wnx * overlap;
+      marble.y += wny * overlap;
+      // Composante de vitesse sur la normale
+      const vn = marble.vx * wnx + marble.vy * wny;
+      marble.vx -= 1.6 * vn * wnx;
+      marble.vy -= 1.6 * vn * wny;
     }
   }
 
   // Hole collision
   for (const h of holes) {
+    if (h.hidden) continue;
     const d = dist(marble, h);
     if (d < h.r - marble.r * 0.4) {
-      // Sucked in!
       sinkHole     = h;
       sinkProgress = 0;
       return;
@@ -1144,11 +1181,42 @@ function loop(ts) {
 
   physics();
   moveHoles();
+  moveSquares();
+
+  // Niveau 15 : trou vert clignotant
+  if (level === 15 && running && !sinkHole) {
+    greenTimer += 1/60;
+    const phase = greenTimer % GREEN_CYCLE;
+    const gh = holes.find(h => h.type === 'green');
+    if (gh) {
+      if (phase < GREEN_SHOW_DELAY) {
+        // Caché : on repositionne loin de la bille (une seule fois au début du cycle)
+        gh.hidden = true;
+      } else {
+        // Visible pendant GREEN_SHOW_DUR secondes
+        if (gh.hidden) {
+          // Repositionner loin de la bille au moment de l'apparition
+          const greenR = HOLE_R + 2;
+          const margin = greenR + 14;
+          for (let k = 0; k < 300; k++) {
+            const nx = margin + Math.random() * (W - margin * 2);
+            const ny = margin + Math.random() * (H - margin * 2);
+            if (Math.hypot(nx - marble.x, ny - marble.y) < W * 0.4) continue;
+            if (squares.some(sq => insideSquare(nx, ny, greenR, sq))) continue;
+            if (holes.some(h => h !== gh && dist(h, {x:nx,y:ny}) < (h.r + greenR) * 1.5)) continue;
+            gh.x = nx; gh.y = ny;
+            break;
+          }
+          gh.hidden = false;
+        }
+      }
+    }
+  }
 
   // Render
   drawBoard();
   drawSquares();
-  holes.forEach(drawHole);
+  holes.forEach(h => { if (!h.hidden) drawHole(h); });
   drawMarble();
 }
 
