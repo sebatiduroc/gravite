@@ -474,22 +474,29 @@ const HOLE_BIG  = HOLE_R * 1.5;  // trou géant
 const FRICTION  = 0.985;
 const GRAVITY   = 0.5;
 const MAX_SPEED = 12;
-const MAX_LEVEL = 10;
+const MAX_LEVEL = 15;
 
-// Nombre de trous rouges par niveau (niveaux 1-4 : +1 par niveau, 5-10 : 5 fixes)
+// ── Config par niveau ──
 function redHoleCount(lvl) {
-  if (lvl <= 4) return 4 + lvl;   // 5,6,7,8
+  if (lvl <= 4) return 4 + lvl;  // 5,6,7,8
   return 5;
 }
-// Nombre de trous rouges mobiles par niveau
 function movingRedCount(lvl) {
   if (lvl < 5)  return 0;
   if (lvl <= 5) return 1;
-  if (lvl <= 8) return lvl - 4;   // 6→2, 7→3, 8→4
-  return 5;                        // 9-10 : tous
+  if (lvl <= 8) return lvl - 4;
+  return 5;
 }
-// Le trou vert bouge-t-il ?
-function greenMoves(lvl) { return lvl >= 10; }
+function greenMoves(lvl)    { return lvl >= 10; }
+function levelUseBigRed(lvl){ return lvl <= 10 || lvl === 12 || lvl === 14 || lvl === 15; }
+function squareCount(lvl)   {
+  if (lvl >= 11 && lvl <= 12) return 1;
+  if (lvl >= 13 && lvl <= 14) return 2;
+  if (lvl === 15)              return 3;
+  return 0;
+}
+// Taille du carré obstacle (côté)
+const SQUARE_SIZE = 80;
 
 // ════════════════════════════════════════════════
 //  STATE
@@ -499,7 +506,8 @@ const ctx    = canvas.getContext('2d');
 
 let W, H;
 let marble = { x:0, y:0, vx:0, vy:0, r: MARBLE_R };
-let holes  = [];
+let holes   = [];
+let squares = [];  // obstacles carrés { x, y, size }
 let tiltX  = 0, tiltY = 0;
 let running  = false;
 let levelStartTime;     // performance.now() au début du niveau
@@ -542,6 +550,12 @@ function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+function insideSquare(x, y, r, sq) {
+  // Teste si un cercle (x,y,r) chevauche un carré
+  const half = sq.size / 2 + r + 4;
+  return Math.abs(x - sq.x) < half && Math.abs(y - sq.y) < half;
+}
+
 function placeHole(r, type) {
   const margin = Math.max(r, HOLE_R) + 14;
   let attempts = 0;
@@ -552,6 +566,7 @@ function placeHole(r, type) {
     const candidate = { x, y };
     if (Math.hypot(x - marble.x, y - marble.y) < 100) continue;
     if (holes.some(h => dist(h, candidate) < (h.r + r) * 2.0)) continue;
+    if (squares.some(sq => insideSquare(x, y, r, sq))) continue;
     return { x, y, r, type, moving: false, vx: 0, vy: 0 };
   }
   return null;
@@ -595,45 +610,161 @@ function placeGreenHole(r) {
   return { x: bestCandidate.x, y: bestCandidate.y, r, type: 'green', moving: false, vx: 0, vy: 0 };
 }
 
+// Place les carrés obstacles pour les niveaux 11-15
+function generateSquares(lvl) {
+  squares = [];
+  const n = squareCount(lvl);
+  if (n === 0) return;
+  const s = SQUARE_SIZE;
+  const margin = s / 2 + MARBLE_R + 10;
+
+  if (n === 1) {
+    // Un carré au centre
+    squares.push({ x: W / 2, y: H / 2, size: s });
+  } else if (n === 2) {
+    // Deux carrés côte à côte, laissant un couloir haut et bas
+    squares.push({ x: W * 0.33, y: H / 2, size: s });
+    squares.push({ x: W * 0.67, y: H / 2, size: s });
+  } else if (n === 3) {
+    // Triangle : un en haut centre, deux en bas
+    squares.push({ x: W / 2,    y: H * 0.33, size: s });
+    squares.push({ x: W * 0.28, y: H * 0.67, size: s });
+    squares.push({ x: W * 0.72, y: H * 0.67, size: s });
+  }
+}
+
+// Place le trou vert de l'autre côté du carré central par rapport à la bille (niveaux 11-12)
+// ou entre les deux carrés (niveaux 13-14), ou au-delà des 3 carrés (niveau 15)
+function placeGreenHoleLvl(r, lvl) {
+  const margin = r + 14;
+  const mx = marble.x, my = marble.y;
+
+  if (lvl === 11 || lvl === 12) {
+    // De l'autre côté du carré central : bille en haut-gauche → vert en bas-droite
+    const sq = squares[0];
+    // Cherche une position dans le quadrant opposé à la bille par rapport au centre
+    const cx = W / 2, cy = H / 2;
+    const signX = mx < cx ? 1 : -1;
+    const signY = my < cy ? 1 : -1;
+    for (let k = 0; k < 200; k++) {
+      const x = cx + signX * (sq.size / 2 + r + 10 + rng() * (W * 0.35));
+      const y = cy + signY * (sq.size / 2 + r + 10 + rng() * (H * 0.35));
+      if (x < margin || x > W - margin || y < margin || y > H - margin) continue;
+      if (squares.some(sq => insideSquare(x, y, r, sq))) continue;
+      if (holes.some(h => dist(h, {x,y}) < (h.r + r) * 2.0)) continue;
+      if (Math.hypot(x - mx, y - my) < W * 0.4) continue;
+      return { x, y, r, type: 'green', moving: false, vx: 0, vy: 0 };
+    }
+  } else if (lvl === 13 || lvl === 14) {
+    // Entre les deux carrés (couloir horizontal)
+    const sq1 = squares[0], sq2 = squares[1];
+    const midX = (sq1.x + sq2.x) / 2;
+    const midY = H / 2;
+    for (let k = 0; k < 200; k++) {
+      const x = midX + (rng() - 0.5) * (sq2.x - sq1.x - sq1.size - r * 2) * 0.8;
+      const y = midY + (rng() - 0.5) * H * 0.25;
+      if (x < margin || x > W - margin || y < margin || y > H - margin) continue;
+      if (squares.some(sq => insideSquare(x, y, r, sq))) continue;
+      if (holes.some(h => dist(h, {x,y}) < (h.r + r) * 2.0)) continue;
+      if (Math.hypot(x - mx, y - my) < W * 0.35) continue;
+      return { x, y, r, type: 'green', moving: false, vx: 0, vy: 0 };
+    }
+  } else if (lvl === 15) {
+    // Au-delà des 3 carrés : zone basse
+    for (let k = 0; k < 300; k++) {
+      const x = margin + rng() * (W - margin * 2);
+      const y = H * 0.6 + rng() * H * 0.3;
+      if (x < margin || x > W - margin || y < margin || y > H - margin) continue;
+      if (squares.some(sq => insideSquare(x, y, r, sq))) continue;
+      if (holes.some(h => dist(h, {x,y}) < (h.r + r) * 2.0)) continue;
+      if (Math.hypot(x - mx, y - my) < W * 0.45) continue;
+      return { x, y, r, type: 'green', moving: false, vx: 0, vy: 0 };
+    }
+  }
+  return placeGreenHole(r); // fallback
+}
+
 function generateLevel(lvl) {
-  // Seed déterministe par niveau → même disposition pour tous
   rng = mulberry32(lvl * 0xDEADBEEF + 0x12345678);
 
-  holes = [];
-  const count   = redHoleCount(lvl);
-  const nMoving = movingRedCount(lvl);
-  const speed   = 0.5 + Math.max(0, lvl - 5) * 0.12;
+  holes   = [];
+  squares = [];
 
-  // 1. Gros trou rouge
-  const bigHole = placeHole(HOLE_BIG, 'red');
-  if (bigHole) {
-    if (lvl >= 9) {
-      const v = seededVelocity(speed);
-      bigHole.moving = true; bigHole.vx = v.vx; bigHole.vy = v.vy;
+  // Carrés obstacles (niveaux 11-15)
+  generateSquares(lvl);
+
+  const speed = 0.5 + Math.max(0, lvl - 5) * 0.12;
+
+  if (lvl <= 10) {
+    // ── Niveaux 1-10 : logique originale ──
+    const count   = redHoleCount(lvl);
+    const nMoving = movingRedCount(lvl);
+
+    // Gros trou
+    const bigHole = placeHole(HOLE_BIG, 'red');
+    if (bigHole) {
+      if (lvl >= 9) { const v = seededVelocity(speed); bigHole.moving = true; bigHole.vx = v.vx; bigHole.vy = v.vy; }
+      holes.push(bigHole);
     }
-    holes.push(bigHole);
+    // Petits trous
+    let sp = 0;
+    while (sp < count - 1) {
+      const h = placeHole(HOLE_R, 'red');
+      if (!h) break;
+      if (sp < nMoving) { const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; }
+      holes.push(h); sp++;
+    }
+
+  } else if (lvl === 11) {
+    // ── Niveau 11 : 4 petits + 1 grand, tous mobiles, 1 carré ──
+    const bigH = placeHole(HOLE_BIG, 'red');
+    if (bigH) { const v = seededVelocity(speed); bigH.moving = true; bigH.vx = v.vx; bigH.vy = v.vy; holes.push(bigH); }
+    for (let i = 0; i < 4; i++) {
+      const h = placeHole(HOLE_R, 'red');
+      if (!h) break;
+      const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; holes.push(h);
+    }
+
+  } else if (lvl === 12) {
+    // ── Niveau 12 : 5 grands trous mobiles, 1 carré ──
+    for (let i = 0; i < 5; i++) {
+      const h = placeHole(HOLE_BIG, 'red');
+      if (!h) break;
+      const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; holes.push(h);
+    }
+
+  } else if (lvl === 13) {
+    // ── Niveau 13 : 5 petits trous mobiles, 2 carrés ──
+    for (let i = 0; i < 5; i++) {
+      const h = placeHole(HOLE_R, 'red');
+      if (!h) break;
+      const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; holes.push(h);
+    }
+
+  } else if (lvl === 14) {
+    // ── Niveau 14 : 5 grands trous mobiles, 2 carrés ──
+    for (let i = 0; i < 5; i++) {
+      const h = placeHole(HOLE_BIG, 'red');
+      if (!h) break;
+      const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; holes.push(h);
+    }
+
+  } else if (lvl === 15) {
+    // ── Niveau 15 : 5 grands trous mobiles, 3 carrés ──
+    for (let i = 0; i < 5; i++) {
+      const h = placeHole(HOLE_BIG, 'red');
+      if (!h) break;
+      const v = seededVelocity(speed); h.moving = true; h.vx = v.vx; h.vy = v.vy; holes.push(h);
+    }
   }
 
-  // 2. Petits trous rouges
-  let smallPlaced = 0;
-  while (smallPlaced < count - 1) {
-    const h = placeHole(HOLE_R, 'red');
-    if (!h) break;
-    if (smallPlaced < nMoving) {
-      const v = seededVelocity(speed);
-      h.moving = true; h.vx = v.vx; h.vy = v.vy;
-    }
-    holes.push(h);
-    smallPlaced++;
-  }
-
-  // 3. Trou vert — placé en dernier pour maximiser les obstacles sur le chemin
+  // Trou vert — stratégiquement placé selon le niveau
   const greenR = HOLE_R + 2;
-  const gh = placeGreenHole(greenR);
+  const gh = lvl >= 11 ? placeGreenHoleLvl(greenR, lvl) : placeGreenHole(greenR);
   if (gh) {
     if (greenMoves(lvl)) {
-      const v = seededVelocity(0.9);
-      gh.moving = true; gh.vx = v.vx; gh.vy = v.vy;
+      const gv = seededVelocity(0.9);
+      gh.moving = true; gh.vx = gv.vx; gh.vy = gv.vy;
     }
     holes.push(gh);
   }
@@ -652,6 +783,26 @@ function moveHoles() {
     if (h.x > W - m) { h.x = W - m; h.vx = -Math.abs(h.vx); }
     if (h.y < m)     { h.y = m;     h.vy = Math.abs(h.vy);  }
     if (h.y > H - m) { h.y = H - m; h.vy = -Math.abs(h.vy); }
+  }
+
+  // Rebonds trous mobiles sur les carrés obstacles
+  for (const h of moving) {
+    for (const sq of squares) {
+      const half = sq.size / 2 + h.r;
+      const dx = h.x - sq.x;
+      const dy = h.y - sq.y;
+      if (Math.abs(dx) < half && Math.abs(dy) < half) {
+        const ox = half - Math.abs(dx);
+        const oy = half - Math.abs(dy);
+        if (ox < oy) {
+          h.x += dx > 0 ? ox : -ox;
+          h.vx *= -1;
+        } else {
+          h.y += dy > 0 ? oy : -oy;
+          h.vy *= -1;
+        }
+      }
+    }
   }
 
   // Rebonds entre trous mobiles (et avec les trous fixes)
@@ -717,6 +868,7 @@ function resetMarble() {
   marble.vy = 0;
   sinkHole     = null;
   sinkProgress = 0;
+  // squares est géré par generateLevel, pas besoin de reset ici
 }
 
 // ════════════════════════════════════════════════
@@ -750,16 +902,54 @@ function buildWoodPattern() {
 //  DRAW
 // ════════════════════════════════════════════════
 function drawBoard() {
-  // Wood surface
   ctx.fillStyle = woodPattern || '#c49550';
   ctx.fillRect(0, 0, W, H);
 
-  // Subtle vignette
+  // Vignette
   const vignette = ctx.createRadialGradient(W/2, H/2, W*0.3, W/2, H/2, W*0.85);
   vignette.addColorStop(0, 'rgba(0,0,0,0)');
   vignette.addColorStop(1, 'rgba(0,0,0,0.35)');
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, W, H);
+}
+
+function drawSquares() {
+  for (const sq of squares) {
+    const half = sq.size / 2;
+    ctx.save();
+    // Ombre portée
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur  = 14;
+    ctx.shadowOffsetY = 4;
+
+    // Corps du carré — bois sombre avec grain
+    const grad = ctx.createLinearGradient(sq.x - half, sq.y - half, sq.x + half, sq.y + half);
+    grad.addColorStop(0,   '#5a3a18');
+    grad.addColorStop(0.4, '#7a5228');
+    grad.addColorStop(0.6, '#6a4420');
+    grad.addColorStop(1,   '#3e2410');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.rect(sq.x - half, sq.y - half, sq.size, sq.size);
+    ctx.fill();
+    ctx.restore();
+
+    // Bordure dorée
+    ctx.beginPath();
+    ctx.rect(sq.x - half, sq.y - half, sq.size, sq.size);
+    ctx.strokeStyle = 'rgba(180,120,40,0.7)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Reflet bord haut/gauche
+    ctx.beginPath();
+    ctx.moveTo(sq.x - half + 2, sq.y + half - 2);
+    ctx.lineTo(sq.x - half + 2, sq.y - half + 2);
+    ctx.lineTo(sq.x + half - 2, sq.y - half + 2);
+    ctx.strokeStyle = 'rgba(255,200,100,0.15)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
 }
 
 function drawHole(h) {
@@ -875,6 +1065,27 @@ function physics() {
   if (marble.y < pad)     { marble.y = pad;      marble.vy *= -0.5; }
   if (marble.y > H - pad) { marble.y = H - pad;  marble.vy *= -0.5; }
 
+  // Square obstacle collision (rebond élastique sur les faces)
+  for (const sq of squares) {
+    const half = sq.size / 2 + marble.r;
+    const dx = marble.x - sq.x;
+    const dy = marble.y - sq.y;
+    if (Math.abs(dx) < half && Math.abs(dy) < half) {
+      // Pénétration sur chaque axe
+      const ox = half - Math.abs(dx);
+      const oy = half - Math.abs(dy);
+      if (ox < oy) {
+        // Rebond horizontal
+        marble.x += dx > 0 ? ox : -ox;
+        marble.vx *= -0.6;
+      } else {
+        // Rebond vertical
+        marble.y += dy > 0 ? oy : -oy;
+        marble.vy *= -0.6;
+      }
+    }
+  }
+
   // Hole collision
   for (const h of holes) {
     const d = dist(marble, h);
@@ -919,6 +1130,7 @@ function loop(ts) {
 
   // Render
   drawBoard();
+  drawSquares();
   holes.forEach(drawHole);
   drawMarble();
 }
@@ -1094,6 +1306,7 @@ buildWoodPattern();
 resetMarble();
 generateLevel(1);
 drawBoard();
+drawSquares();
 holes.forEach(drawHole);
 drawMarble();
 </script>
