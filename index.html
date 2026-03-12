@@ -94,11 +94,12 @@
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    gap: 20px;
-    background: rgba(10,5,0,0.88);
+    gap: 16px;
+    background: rgba(10,5,0,0.92);
     backdrop-filter: blur(6px);
-    padding: 30px;
+    padding: 24px 20px;
     text-align: center;
+    overflow-y: auto;
   }
   .overlay.active { display: flex; }
 
@@ -116,7 +117,7 @@
     font-size: 13px;
     color: var(--ui-text);
     opacity: 0.6;
-    max-width: 280px;
+    max-width: 300px;
     line-height: 1.7;
     letter-spacing: 0.5px;
   }
@@ -140,6 +141,8 @@
     padding: 14px 32px;
     cursor: pointer;
     transition: transform 0.1s, opacity 0.1s;
+    width: 100%;
+    max-width: 300px;
   }
   .btn:active { transform: scale(0.96); opacity: 0.85; }
 
@@ -149,21 +152,111 @@
     border: 1px solid rgba(240,216,160,0.3);
   }
 
-  #level-badge {
-    font-size: 11px;
-    letter-spacing: 3px;
-    color: var(--ui-accent);
-    text-transform: uppercase;
-    opacity: 0.5;
-  }
-
   /* iOS permission hint */
   #ios-hint {
     font-size: 11px;
     color: var(--ui-text);
     opacity: 0.4;
-    margin-top: -10px;
+    margin-top: -8px;
   }
+
+  /* ── AUTH styles ── */
+  .auth-box {
+    width: 100%;
+    max-width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .auth-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--ui-accent);
+    text-transform: uppercase;
+    text-align: left;
+    margin-bottom: 6px;
+    opacity: 0.8;
+  }
+  .auth-input {
+    width: 100%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(232,160,32,0.3);
+    color: var(--ui-text);
+    font-family: 'DM Mono', monospace;
+    font-size: 15px;
+    padding: 12px 14px;
+    border-radius: 6px;
+    outline: none;
+    margin-bottom: 14px;
+    transition: border-color 0.2s;
+    -webkit-appearance: none;
+  }
+  .auth-input:focus { border-color: var(--ui-accent); }
+  .auth-input.err {
+    border-color: #cc2200;
+    animation: shake 0.4s ease;
+  }
+  @keyframes shake {
+    0%,100%{transform:translateX(0)}
+    20%{transform:translateX(-6px)}
+    40%{transform:translateX(6px)}
+    60%{transform:translateX(-4px)}
+    80%{transform:translateX(4px)}
+  }
+  .pseudo-warn {
+    font-size: 11px;
+    color: #e0a040;
+    letter-spacing: 1px;
+    line-height: 1.5;
+    margin-top: -10px;
+    margin-bottom: 12px;
+    padding: 7px 10px;
+    border: 1px solid rgba(224,160,64,0.35);
+    background: rgba(224,160,64,0.06);
+    border-radius: 4px;
+    text-align: left;
+    display: none;
+  }
+  .auth-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    max-width: 300px;
+  }
+  .auth-row .btn { flex: 1; padding: 14px 8px; font-size: 11px; }
+
+  /* ── LEADERBOARD styles ── */
+  .lb-box {
+    width: 100%;
+    max-width: 320px;
+    text-align: left;
+    margin-top: 4px;
+  }
+  .lb-title {
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: var(--ui-accent);
+    text-transform: uppercase;
+    text-align: center;
+    margin-bottom: 10px;
+    opacity: 0.7;
+  }
+  .lb-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(232,160,32,0.08);
+    font-size: 12px;
+  }
+  .lb-row:first-child { border-top: 1px solid rgba(232,160,32,0.08); }
+  .lb-row.me { background: rgba(232,160,32,0.08); border-radius: 4px; }
+  .lb-rank { color: var(--ui-accent); opacity: 0.6; width: 20px; flex-shrink: 0; }
+  .lb-name { color: var(--ui-text); flex: 1; margin: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-score { color: var(--ui-accent); white-space: nowrap; }
+  .lb-empty { font-size: 11px; color: var(--ui-text); opacity: 0.3; text-align: center; padding: 12px 0; }
+  .lb-new { font-size: 11px; color: var(--ui-accent); letter-spacing: 1px; padding: 8px 10px;
+    border: 1px solid rgba(232,160,32,0.3); border-radius: 4px; text-align: center; margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -188,13 +281,37 @@
   <canvas id="canvas"></canvas>
 </div>
 
-<!-- START SCREEN -->
+<!-- START / AUTH SCREEN -->
 <div class="overlay active" id="screen-start">
   <h1>GRA<span>VITÉ</span></h1>
   <p>Inclinez votre téléphone pour guider la bille.<br>Évitez les trous <strong style="color:#ff4422">rouges</strong>, atteignez le trou <strong style="color:#00cc55">vert</strong>.</p>
-  <button class="btn" id="btn-start">Commencer</button>
+
+  <div class="auth-box">
+    <div class="auth-label">Votre pseudo</div>
+    <input type="text" id="inp-pseudo" class="auth-input" placeholder="Entrez votre pseudo…" maxlength="20"
+           autocomplete="off" spellcheck="false"
+           oninput="checkPseudo(this.value)"
+           onkeydown="if(event.key==='Enter')launchGame()">
+    <div class="pseudo-warn" id="pseudo-warn">⚠ Pseudo déjà utilisé. Si ce n'est pas vous, choisissez-en un autre.</div>
+  </div>
+
+  <div class="auth-row">
+    <button class="btn secondary" id="btn-records-start" onclick="openRecords()">🏆 Records</button>
+    <button class="btn" id="btn-start" onclick="launchGame()">Jouer</button>
+  </div>
+
   <p id="ios-hint">Sur iPhone, une permission gyroscope sera demandée.</p>
   <p style="font-size:11px;opacity:0.3;letter-spacing:1px">← TOUCHES DIRECTIONNELLES SUR ORDINATEUR →</p>
+</div>
+
+<!-- RECORDS SCREEN -->
+<div class="overlay" id="screen-records">
+  <h1 style="font-size:clamp(22px,6vw,36px)">🏆 <span>Records</span></h1>
+  <p style="font-size:10px;letter-spacing:2px;opacity:0.4;margin-top:-8px">30 DERNIERS JOURS — TOP 10</p>
+  <div class="lb-box">
+    <div id="lb-content"><div class="lb-empty">Chargement…</div></div>
+  </div>
+  <button class="btn secondary" onclick="showScreen('start')">Fermer</button>
 </div>
 
 <!-- WIN SCREEN (niveau intermédiaire) -->
@@ -209,10 +326,14 @@
 
 <!-- FINAL SCREEN (fin du niveau 10) -->
 <div class="overlay" id="screen-final">
-  <h1>GRA<span>VITÉ</span></h1>
-  <div style="font-size:11px;letter-spacing:3px;opacity:0.4;margin-bottom:8px">TEMPS TOTAL — 10 NIVEAUX</div>
+  <h1 style="font-size:clamp(24px,7vw,40px)">GRA<span>VITÉ</span></h1>
+  <div style="font-size:10px;letter-spacing:3px;opacity:0.4">TEMPS TOTAL — 10 NIVEAUX</div>
   <div class="result-time" id="final-time">0.0s</div>
-  <p id="final-record">Nouveau record !</p>
+  <div class="lb-new" id="final-new-record" style="display:none"></div>
+  <div class="lb-box">
+    <div class="lb-title">Classement — 30 derniers jours</div>
+    <div id="final-lb-content"><div class="lb-empty">Chargement…</div></div>
+  </div>
   <button class="btn" id="btn-replay">Recommencer</button>
 </div>
 
@@ -224,6 +345,125 @@
 </div>
 
 <script>
+// ════════════════════════════════════════════════
+//  JSONBIN.IO
+// ════════════════════════════════════════════════
+const API_KEY = '$2a$10$KF8MxpCoz7EiaFpfywvUvel.9yrVRPB.gl670nIVTkj1qJ7MtVor6';
+const BIN_ID  = '69b3164bb7ec241ddc62fca0';
+const JBIN    = 'https://api.jsonbin.io/v3';
+
+let playerPseudo = '';
+let knownPseudos = new Set();
+
+// Charge les pseudos connus + purge les scores > 30 jours
+async function loadBinData() {
+  try {
+    const r = await fetch(`${JBIN}/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': API_KEY } });
+    const d = await r.json();
+    const records = d.record?.records || [];
+    knownPseudos = new Set(records.map(e => e.pseudo?.toLowerCase()).filter(Boolean));
+
+    // Purge scores > 30 jours
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const before = records.length;
+    const purged = records.filter(e => e.ts && e.ts >= cutoff);
+    if (purged.length !== before) {
+      await fetch(`${JBIN}/b/${BIN_ID}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
+        body: JSON.stringify({ records: purged })
+      });
+    }
+    return purged;
+  } catch(e) { return []; }
+}
+
+// Vérifie le pseudo saisi vs pseudos connus
+function checkPseudo(val) {
+  const warn = document.getElementById('pseudo-warn');
+  const exists = val.trim().length > 0 && knownPseudos.has(val.trim().toLowerCase());
+  warn.style.display = exists ? 'block' : 'none';
+}
+
+// Sauvegarde le score final dans jsonbin (top 10 sur 30 jours, 1 score par pseudo)
+async function saveScore(totalSecs) {
+  try {
+    const r = await fetch(`${JBIN}/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': API_KEY } });
+    const d = await r.json();
+    let records = d.record?.records || [];
+
+    // Purge > 30 jours
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    records = records.filter(e => e.ts && e.ts >= cutoff);
+
+    const entry = { pseudo: playerPseudo, time: totalSecs, ts: new Date().toISOString() };
+
+    // Dédoublonnage : 1 seul score par pseudo (le meilleur)
+    const byPseudo = {};
+    [...records, entry].forEach(e => {
+      if (!byPseudo[e.pseudo] || e.time < byPseudo[e.pseudo].time) byPseudo[e.pseudo] = e;
+    });
+
+    // Tri par temps croissant
+    records = Object.values(byPseudo).sort((a, b) => a.time - b.time);
+
+    await fetch(`${JBIN}/b/${BIN_ID}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
+      body: JSON.stringify({ records })
+    });
+    return records;
+  } catch(e) { return null; }
+}
+
+// Affiche le leaderboard dans un conteneur DOM
+function renderLeaderboard(records, containerId) {
+  const el = document.getElementById(containerId);
+  if (!records || records.length === 0) {
+    el.innerHTML = '<div class="lb-empty">Aucun record encore…</div>';
+    return;
+  }
+  const top10 = records.slice(0, 10);
+  el.innerHTML = top10.map((e, i) => {
+    const m = Math.floor(e.time / 60), s = (e.time % 60).toFixed(2).padStart(5, '0');
+    const timeStr = m > 0 ? `${m}:${s}` : `${(e.time).toFixed(2)}s`;
+    const isMe = e.pseudo === playerPseudo;
+    return `<div class="lb-row${isMe ? ' me' : ''}">
+      <span class="lb-rank">${i + 1}</span>
+      <span class="lb-name">${esc(e.pseudo)}</span>
+      <span class="lb-score">${timeStr}</span>
+    </div>`;
+  }).join('');
+}
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// Ouvre le panneau records depuis l'écran d'accueil
+async function openRecords() {
+  showScreen('records');
+  document.getElementById('lb-content').innerHTML = '<div class="lb-empty">Chargement…</div>';
+  const records = await loadBinData();
+  renderLeaderboard(records, 'lb-content');
+}
+
+// Lance le jeu après validation du pseudo
+function launchGame() {
+  const inp = document.getElementById('inp-pseudo');
+  const val = inp.value.trim();
+  if (!val) {
+    inp.classList.remove('err');
+    void inp.offsetWidth;
+    inp.classList.add('err');
+    setTimeout(() => inp.classList.remove('err'), 1000);
+    inp.focus();
+    return;
+  }
+  playerPseudo = val;
+  localStorage.setItem('gravite_pseudo', val);
+  if (window._requestGyro) window._requestGyro();
+  startGame(1, false);
+}
+
 // ════════════════════════════════════════════════
 //  CONFIG
 // ════════════════════════════════════════════════
@@ -695,21 +935,40 @@ function loop(ts) {
 // ════════════════════════════════════════════════
 //  WIN / LOSE
 // ════════════════════════════════════════════════
-function onWin() {
+async function onWin() {
   const levelTime = levelElapsed;
   totalElapsed += levelTime;
 
   document.getElementById('timer-disp').textContent = totalElapsed.toFixed(1);
 
   if (level >= MAX_LEVEL) {
-    // Partie terminée !
+    // Partie terminée — sauvegarde et affichage
     const isRecord = !bestTotal || totalElapsed < bestTotal;
     if (isRecord) bestTotal = totalElapsed;
-    document.getElementById('final-time').textContent = totalElapsed.toFixed(2) + 's';
-    document.getElementById('final-record').textContent =
-      isRecord ? '🏆 Nouveau record !' : `Record : ${bestTotal.toFixed(2)}s`;
     document.getElementById('best-disp').textContent = bestTotal.toFixed(1);
+
+    // Sauvegarde locale
+    const prevLocal = parseFloat(localStorage.getItem('gravite_best') || 'Infinity');
+    if (totalElapsed < prevLocal) localStorage.setItem('gravite_best', totalElapsed.toFixed(3));
+
+    document.getElementById('final-time').textContent = totalElapsed.toFixed(2) + 's';
+    document.getElementById('final-lb-content').innerHTML = '<div class="lb-empty">Enregistrement…</div>';
+    document.getElementById('final-new-record').style.display = 'none';
     showScreen('final');
+
+    // Sauvegarde jsonbin + affichage classement
+    const records = await saveScore(totalElapsed);
+    if (records) {
+      renderLeaderboard(records, 'final-lb-content');
+      const myRank = records.findIndex(e => e.pseudo === playerPseudo);
+      if (myRank >= 0 && myRank < 10) {
+        const newRecEl = document.getElementById('final-new-record');
+        newRecEl.textContent = myRank === 0 ? '🏆 Nouveau record absolu !' : `✦ ${myRank + 1}e au classement !`;
+        newRecEl.style.display = 'block';
+      }
+    } else {
+      document.getElementById('final-lb-content').innerHTML = '<div class="lb-empty">Classement indisponible</div>';
+    }
   } else {
     document.getElementById('win-level-time').textContent = levelTime.toFixed(2) + 's';
     document.getElementById('win-total-time').textContent = totalElapsed.toFixed(2) + 's';
@@ -790,21 +1049,16 @@ function initGyro() {
 // ════════════════════════════════════════════════
 //  EVENTS
 // ════════════════════════════════════════════════
-document.getElementById('btn-start').addEventListener('click', () => {
-  if (window._requestGyro) window._requestGyro();
-  startGame(1, false);
-});
-
 document.getElementById('btn-next').addEventListener('click', () => {
-  startGame(level + 1, true);  // garde le total
+  startGame(level + 1, true);
 });
 
 document.getElementById('btn-replay').addEventListener('click', () => {
-  startGame(1, false);
+  showScreen('start');
 });
 
 document.getElementById('btn-restart-lose').addEventListener('click', () => {
-  startGame(1, false);
+  showScreen('start');
 });
 
 document.addEventListener('keydown', e => { keysDown[e.key] = true;  });
@@ -843,7 +1097,25 @@ canvas.addEventListener('mouseleave', () => { tiltX = 0; tiltY = 0; });
 resize();
 initGyro();
 
-// Affichage initial
+// Pré-remplit le pseudo depuis localStorage
+const savedPseudo = localStorage.getItem('gravite_pseudo');
+if (savedPseudo) {
+  document.getElementById('inp-pseudo').value = savedPseudo;
+}
+
+// Charge les pseudos connus (vérification doublon) + purge 30j
+loadBinData().then(() => {
+  if (savedPseudo) checkPseudo(savedPseudo);
+});
+
+// Meilleur temps local dans le HUD
+const savedBest = localStorage.getItem('gravite_best');
+if (savedBest) {
+  bestTotal = parseFloat(savedBest);
+  document.getElementById('best-disp').textContent = bestTotal.toFixed(1);
+}
+
+// Affichage initial du canvas
 buildWoodPattern();
 resetMarble();
 generateLevel(1);
