@@ -388,6 +388,7 @@ function checkPseudo(val) {
 
 // Sauvegarde le score final dans jsonbin (top 10 sur 30 jours, 1 score par pseudo)
 async function saveScore(totalSecs) {
+  if (playerPseudo.toLowerCase() === 'test') return [];
   try {
     const r = await fetch(`${JBIN}/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': API_KEY } });
     const d = await r.json();
@@ -463,9 +464,9 @@ function launchGame() {
   localStorage.setItem('gravite_pseudo', val);
   if (window._requestGyro) window._requestGyro();
 
-  // ⚠️ TEMPORAIRE — accès niveau direct pour séb
-  if (val.toLowerCase() === 'séb' || val.toLowerCase() === 'seb') {
-    const lvl = parseInt(prompt(`Niveau de départ ? (1-${MAX_LEVEL})`, '1'), 10);
+  // ⚠️ TEMPORAIRE — accès niveau direct pour pseudo "test"
+  if (val.toLowerCase() === 'test') {
+    const lvl = parseInt(prompt(`Niveau de départ ? (1-${MAX_LEVEL})\n⚠️ Le pseudo "test" n'enregistre aucun record.`, '1'), 10);
     if (!isNaN(lvl) && lvl >= 1 && lvl <= MAX_LEVEL) {
       startGame(lvl, false);
       return;
@@ -507,9 +508,9 @@ function squareCount(lvl) {
 }
 const SQUARE_SIZE = 90;
 // Vitesse rotation (rad/frame)
-const ROT_SPEED_12 = 0.012;  // niv 12 : tourne sur place
-const ROT_SPEED_13 = 0.018;  // niv 13 : tourne en se déplaçant
-const ROT_SPEED_14 = 0.022;  // niv 14 : 2 carrés, vitesses variées
+const ROT_SPEED_12 = 0.004;  // niv 12 : tourne sur place
+const ROT_SPEED_13 = 0.006;  // niv 13 : tourne en se déplaçant
+const ROT_SPEED_14 = 0.0073; // niv 14 : 2 carrés, vitesses variées
 // Niveau 15 : trou vert clignotant
 const GREEN_SHOW_DELAY = 5;   // secondes avant apparition
 const GREEN_SHOW_DUR   = 10;  // secondes visible
