@@ -701,12 +701,17 @@ function placeGreenHoleLvl(r, lvl) {
     result = tryPlaceGreen(r, mx, my, W * 0.38, xA, xB, yA, yB);
 
   } else if (lvl === 13) {
-    // Entre les deux carrés : couloir vertical central
-    const sq1 = squares[0], sq2 = squares[1];
-    const xA = sq1.x + sq1.size / 2 + r + 5;
-    const xB = sq2.x - sq2.size / 2 - r - 5;
-    result = tryPlaceGreen(r, mx, my, W * 0.32, xA, xB, margin, H - margin);
-    if (!result) result = tryPlaceGreen(r, mx, my, W * 0.32, margin, W - margin, margin, H - margin);
+    // Coin opposé à la bille par rapport au carré central (1 seul carré)
+    const cx = W / 2, cy = H / 2;
+    const signX = mx < cx ? 1 : -1;
+    const signY = my < cy ? 1 : -1;
+    const half = squares[0].size / 2;
+    const xA = signX > 0 ? cx + half + r + 5 : margin;
+    const xB = signX > 0 ? W - margin        : cx - half - r - 5;
+    const yA = signY > 0 ? cy + half + r + 5 : margin;
+    const yB = signY > 0 ? H - margin        : cy - half - r - 5;
+    result = tryPlaceGreen(r, mx, my, W * 0.45, xA, xB, yA, yB);
+    if (!result) result = tryPlaceGreen(r, mx, my, W * 0.35, margin, W - margin, margin, H - margin);
 
   } else if (lvl === 14) {
     // De l'autre côté du plateau par rapport à la bille (coin opposé)
