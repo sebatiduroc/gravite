@@ -220,7 +220,7 @@
 const MARBLE_R   = 14;
 const HOLE_R     = 18;
 const FRICTION   = 0.985;
-const GRAVITY    = 0.5;   // multiplier for tilt→accel
+const GRAVITY    = 0.5;   // multiplicateur inclinaison→accélération
 const MAX_SPEED  = 12;
 const RED_HOLES  = 11;
 
@@ -232,14 +232,14 @@ const ctx    = canvas.getContext('2d');
 
 let W, H;
 let marble = { x:0, y:0, vx:0, vy:0, r: MARBLE_R };
-let holes  = [];   // { x, y, r, type:'red'|'green' }
+let holes  = [];   // { x, y, r, type:'rouge'|'vert' }
 let tiltX  = 0, tiltY = 0;
 let keysDown = {};
 let running  = false;
 let startTime, elapsed, bestTimes = {};
 let level    = 1;
 let animId;
-let sinkHole = null;  // hole marble is falling into
+let sinkHole = null;  // trou dans lequel la bille tombe
 let sinkProgress = 0;
 
 // ════════════════════════════════════════════════
@@ -581,7 +581,7 @@ function initGyro() {
   const handler = (e) => {
     // gamma = left/right tilt, beta = front/back tilt
     const gamma = Math.max(-30, Math.min(30, e.gamma || 0));
-    const beta  = Math.max(-30, Math.min(30, (e.beta  || 0) - 20)); // -20° calibration
+    const beta = Math.max(-30, Math.min(30, e.beta || 0));
     tiltX = gamma / 30;
     tiltY = beta  / 30;
   };
@@ -634,7 +634,7 @@ window.addEventListener('resize', () => {
   }
 });
 
-// Mouse/touch debug control (desktop)
+// Contrôle souris (ordinateur)
 canvas.addEventListener('mousemove', (e) => {
   if (!running) return;
   const rect = canvas.getBoundingClientRect();
