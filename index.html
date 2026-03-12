@@ -196,26 +196,26 @@
     border-color: #cc2200;
     animation: shake 0.4s ease;
   }
-  @keyframes shake {
-    0%,100%{transform:translateX(0)}
-    20%{transform:translateX(-6px)}
-    40%{transform:translateX(6px)}
-    60%{transform:translateX(-4px)}
-    80%{transform:translateX(4px)}
-  }
   .pseudo-warn {
     font-size: 11px;
     color: #e0a040;
     letter-spacing: 1px;
     line-height: 1.5;
     margin-top: -10px;
-    margin-bottom: 12px;
+    margin-bottom: 4px;
     padding: 7px 10px;
     border: 1px solid rgba(224,160,64,0.35);
     background: rgba(224,160,64,0.06);
     border-radius: 4px;
     text-align: left;
     display: none;
+  }
+  @keyframes shake {
+    0%,100%{transform:translateX(0)}
+    20%{transform:translateX(-6px)}
+    40%{transform:translateX(6px)}
+    60%{transform:translateX(-4px)}
+    80%{transform:translateX(4px)}
   }
   .auth-row {
     display: flex;
@@ -377,6 +377,7 @@ async function loadBinData() {
     return purged;
   } catch(e) { return []; }
 }
+
 
 // Vérifie le pseudo saisi vs pseudos connus
 function checkPseudo(val) {
@@ -1105,7 +1106,8 @@ if (savedPseudo) {
 
 // Charge les pseudos connus (vérification doublon) + purge 30j
 loadBinData().then(() => {
-  if (savedPseudo) checkPseudo(savedPseudo);
+  const saved = localStorage.getItem('gravite_pseudo');
+  if (saved) checkPseudo(saved);
 });
 
 // Meilleur temps local dans le HUD
