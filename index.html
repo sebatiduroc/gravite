@@ -309,9 +309,18 @@
   <h1 style="font-size:clamp(22px,6vw,36px)">🏆 <span>Records</span></h1>
   <p style="font-size:10px;letter-spacing:2px;opacity:0.4;margin-top:-8px">30 DERNIERS JOURS — TOP 10</p>
   <div class="lb-box">
-    <div id="lb-content"><div class="lb-empty">Chargement…</div></div>
+    <div class="lb-title">Niveau 5</div>
+    <div id="lb-r5"><div class="lb-empty">Chargement…</div></div>
   </div>
-  <button class="btn secondary" onclick="showScreen('start')">Fermer</button>
+  <div class="lb-box" style="margin-top:16px">
+    <div class="lb-title">Niveau 10</div>
+    <div id="lb-r10"><div class="lb-empty">Chargement…</div></div>
+  </div>
+  <div class="lb-box" style="margin-top:16px">
+    <div class="lb-title">Niveau 15</div>
+    <div id="lb-r15"><div class="lb-empty">Chargement…</div></div>
+  </div>
+  <button class="btn secondary" style="margin-top:16px" onclick="showScreen('start')">Fermer</button>
 </div>
 
 <!-- WIN SCREEN (niveau intermédiaire) -->
@@ -331,7 +340,7 @@
   <div class="result-time" id="final-time">0.0s</div>
   <div class="lb-new" id="final-new-record" style="display:none"></div>
   <div class="lb-box">
-    <div class="lb-title">Classement — 30 derniers jours</div>
+    <div class="lb-title">Classement — Niveau 15</div>
     <div id="final-lb-content"><div class="lb-empty">Chargement…</div></div>
   </div>
   <button class="btn" id="btn-replay">Recommencer</button>
@@ -355,29 +364,40 @@ const JBIN    = 'https://api.jsonbin.io/v3';
 let playerPseudo = '';
 let knownPseudos = new Set();
 
-// Charge les pseudos connus + purge les scores > 30 jours
+// Charge toutes les données + purge les scores > 30 jours
+// Structure bin : { r5: [], r10: [], r15: [] }
 async function loadBinData() {
   try {
     const r = await fetch(`${JBIN}/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': API_KEY } });
     const d = await r.json();
-    const records = d.record?.records || [];
-    knownPseudos = new Set(records.map(e => e.pseudo?.toLowerCase()).filter(Boolean));
-
-    // Purge scores > 30 jours
+    const bin = d.record || {};
     const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const before = records.length;
-    const purged = records.filter(e => e.ts && e.ts >= cutoff);
-    if (purged.length !== before) {
-      await fetch(`${JBIN}/b/${BIN_ID}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
-        body: JSON.stringify({ records: purged })
-      });
+
+    // Compat ancienne structure (migration silencieuse)
+    const r5  = (bin.r5  || bin.records || []).filter(e => e.ts >= cutoff);
+    const r10 = (bin.r10 || []).filter(e => e.ts >= cutoff);
+    const r15 = (bin.r15 || []).filter(e => e.ts >= cutoff);
+
+    // Pseudos connus = union des 3 tableaux
+    knownPseudos = new Set([...r5, ...r10, ...r15].map(e => e.pseudo?.toLowerCase()).filter(Boolean));
+
+    // Purge si nécessaire
+    const totalBefore = (bin.r5||bin.records||[]).length + (bin.r10||[]).length + (bin.r15||[]).length;
+    const totalAfter  = r5.length + r10.length + r15.length;
+    if (totalAfter !== totalBefore) {
+      await writeBin({ r5, r10, r15 });
     }
-    return purged;
-  } catch(e) { return []; }
+    return { r5, r10, r15 };
+  } catch(e) { return { r5:[], r10:[], r15:[] }; }
 }
 
+async function writeBin(data) {
+  await fetch(`${JBIN}/b/${BIN_ID}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
+    body: JSON.stringify(data)
+  });
+}
 
 // Vérifie le pseudo saisi vs pseudos connus
 function checkPseudo(val) {
@@ -386,47 +406,54 @@ function checkPseudo(val) {
   warn.style.display = exists ? 'block' : 'none';
 }
 
-// Sauvegarde le score final dans jsonbin (top 10 sur 30 jours, 1 score par pseudo)
+// Insère un score dans un tableau, dédoublonne par pseudo (meilleur score), trie, garde top 10
+function mergeScore(arr, entry) {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const purged = arr.filter(e => e.ts >= cutoff);
+  const byPseudo = {};
+  [...purged, entry].forEach(e => {
+    if (!byPseudo[e.pseudo] || e.time < byPseudo[e.pseudo].time) byPseudo[e.pseudo] = e;
+  });
+  return Object.values(byPseudo).sort((a, b) => a.time - b.time);
+}
+
+// Sauvegarde silencieuse à un palier (5 ou 10), sans bloquer le jeu
+async function saveMilestone(palier, totalSecs) {
+  if (playerPseudo.toLowerCase() === 'test') return;
+  try {
+    const r = await fetch(`${JBIN}/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': API_KEY } });
+    const d = await r.json();
+    const bin = d.record || {};
+    const key = palier === 5 ? 'r5' : 'r10';
+    const arr = bin[key] || [];
+    const entry = { pseudo: playerPseudo, time: totalSecs, ts: new Date().toISOString() };
+    const updated = mergeScore(arr, entry);
+    await writeBin({ r5: bin.r5 || [], r10: bin.r10 || [], r15: bin.r15 || [], [key]: updated });
+  } catch {}
+}
+
+// Sauvegarde le score final (niveau 15) et retourne le tableau r15 mis à jour
 async function saveScore(totalSecs) {
   if (playerPseudo.toLowerCase() === 'test') return [];
   try {
     const r = await fetch(`${JBIN}/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': API_KEY } });
     const d = await r.json();
-    let records = d.record?.records || [];
-
-    // Purge > 30 jours
-    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    records = records.filter(e => e.ts && e.ts >= cutoff);
-
+    const bin = d.record || {};
     const entry = { pseudo: playerPseudo, time: totalSecs, ts: new Date().toISOString() };
-
-    // Dédoublonnage : 1 seul score par pseudo (le meilleur)
-    const byPseudo = {};
-    [...records, entry].forEach(e => {
-      if (!byPseudo[e.pseudo] || e.time < byPseudo[e.pseudo].time) byPseudo[e.pseudo] = e;
-    });
-
-    // Tri par temps croissant
-    records = Object.values(byPseudo).sort((a, b) => a.time - b.time);
-
-    await fetch(`${JBIN}/b/${BIN_ID}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
-      body: JSON.stringify({ records })
-    });
-    return records;
-  } catch(e) { return null; }
+    const r15 = mergeScore(bin.r15 || [], entry);
+    await writeBin({ r5: bin.r5 || [], r10: bin.r10 || [], r15 });
+    return r15;
+  } catch { return null; }
 }
 
-// Affiche le leaderboard dans un conteneur DOM
+// Affiche un leaderboard dans un conteneur DOM
 function renderLeaderboard(records, containerId) {
   const el = document.getElementById(containerId);
   if (!records || records.length === 0) {
     el.innerHTML = '<div class="lb-empty">Aucun record encore…</div>';
     return;
   }
-  const top10 = records.slice(0, 10);
-  el.innerHTML = top10.map((e, i) => {
+  el.innerHTML = records.slice(0, 10).map((e, i) => {
     const m = Math.floor(e.time / 60), s = (e.time % 60).toFixed(2).padStart(5, '0');
     const timeStr = m > 0 ? `${m}:${s}` : `${(e.time).toFixed(2)}s`;
     const isMe = e.pseudo === playerPseudo;
@@ -443,9 +470,13 @@ function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 // Ouvre le panneau records depuis l'écran d'accueil
 async function openRecords() {
   showScreen('records');
-  document.getElementById('lb-content').innerHTML = '<div class="lb-empty">Chargement…</div>';
-  const records = await loadBinData();
-  renderLeaderboard(records, 'lb-content');
+  ['lb-r5','lb-r10','lb-r15'].forEach(id => {
+    document.getElementById(id).innerHTML = '<div class="lb-empty">Chargement…</div>';
+  });
+  const data = await loadBinData();
+  renderLeaderboard(data.r5,  'lb-r5');
+  renderLeaderboard(data.r10, 'lb-r10');
+  renderLeaderboard(data.r15, 'lb-r15');
 }
 
 // Lance le jeu après validation du pseudo
@@ -515,6 +546,28 @@ const ROT_SPEED_14 = 0.0073; // niv 14 : 2 carrés, vitesses variées
 const GREEN_SHOW_DELAY = 5;   // secondes avant apparition
 const GREEN_SHOW_DUR   = 10;  // secondes visible
 const GREEN_CYCLE      = GREEN_SHOW_DELAY + GREEN_SHOW_DUR; // 15s par cycle
+
+// ════════════════════════════════════════════════
+//  WAKE LOCK (empêche la mise en veille pendant le jeu)
+// ════════════════════════════════════════════════
+let wakeLock = null;
+
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    // Réacquérir si la page revient au premier plan
+    document.addEventListener('visibilitychange', async () => {
+      if (wakeLock !== null && document.visibilityState === 'visible') {
+        try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+      }
+    }, { once: false });
+  } catch {}
+}
+
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release(); wakeLock = null; }
+}
 
 // ════════════════════════════════════════════════
 //  STATE
@@ -1258,26 +1311,29 @@ async function onWin() {
 
   document.getElementById('timer-disp').textContent = totalElapsed.toFixed(1);
 
+  // Sauvegarde silencieuse aux paliers 5 et 10
+  if (level === 5)  saveMilestone(5,  totalElapsed);
+  if (level === 10) saveMilestone(10, totalElapsed);
+
   if (level >= MAX_LEVEL) {
-    // Partie terminée — sauvegarde et affichage
+    // Partie complète — sauvegarde et affichage
     const isRecord = !bestTotal || totalElapsed < bestTotal;
     if (isRecord) bestTotal = totalElapsed;
     document.getElementById('best-disp').textContent = bestTotal.toFixed(1);
 
-    // Sauvegarde locale
     const prevLocal = parseFloat(localStorage.getItem('gravite_best') || 'Infinity');
     if (totalElapsed < prevLocal) localStorage.setItem('gravite_best', totalElapsed.toFixed(3));
 
     document.getElementById('final-time').textContent = totalElapsed.toFixed(2) + 's';
     document.getElementById('final-lb-content').innerHTML = '<div class="lb-empty">Enregistrement…</div>';
     document.getElementById('final-new-record').style.display = 'none';
+    releaseWakeLock();
     showScreen('final');
 
-    // Sauvegarde jsonbin + affichage classement
-    const records = await saveScore(totalElapsed);
-    if (records) {
-      renderLeaderboard(records, 'final-lb-content');
-      const myRank = records.findIndex(e => e.pseudo === playerPseudo);
+    const r15 = await saveScore(totalElapsed);
+    if (r15) {
+      renderLeaderboard(r15, 'final-lb-content');
+      const myRank = r15.findIndex(e => e.pseudo === playerPseudo);
       if (myRank >= 0 && myRank < 10) {
         const newRecEl = document.getElementById('final-new-record');
         newRecEl.textContent = myRank === 0 ? '🏆 Nouveau record absolu !' : `✦ ${myRank + 1}e au classement !`;
@@ -1296,6 +1352,7 @@ async function onWin() {
 function onLose() {
   const total = totalElapsed + levelElapsed;
   document.getElementById('lose-total-time').textContent = total.toFixed(2) + 's';
+  releaseWakeLock();
   showScreen('lose');
 }
 
@@ -1329,6 +1386,7 @@ function startGame(lvl, keepTotal) {
   showScreen(null);
   running        = true;
   levelStartTime = performance.now();
+  requestWakeLock();
 
   if (animId) cancelAnimationFrame(animId);
   animId = requestAnimationFrame(loop);
@@ -1403,7 +1461,7 @@ if (savedPseudo) {
 }
 
 // Charge les pseudos connus (vérification doublon) + purge 30j
-loadBinData().then(() => {
+loadBinData().then(data => {
   const saved = localStorage.getItem('gravite_pseudo');
   if (saved) checkPseudo(saved);
 });
