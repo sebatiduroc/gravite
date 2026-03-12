@@ -285,75 +285,117 @@ function resize() {
 }
 
 // ════════════════════════════════════════════════
-//  LEVEL GENERATION
+//  GÉNÉRATEUR PSEUDO-ALÉATOIRE SEEDÉ (mulberry32)
+//  Garantit des niveaux identiques pour tous les joueurs
 // ════════════════════════════════════════════════
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+let rng; // instance courante, réinitialisée à chaque niveau
+
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function placeHole(r, type, extraMinDist) {
+function placeHole(r, type) {
   const margin = Math.max(r, HOLE_R) + 14;
   let attempts = 0;
   while (attempts < 3000) {
     attempts++;
-    const x = margin + Math.random() * (W - margin * 2);
-    const y = margin + Math.random() * (H - margin * 2);
+    const x = margin + rng() * (W - margin * 2);
+    const y = margin + rng() * (H - margin * 2);
     const candidate = { x, y };
     if (Math.hypot(x - marble.x, y - marble.y) < 100) continue;
-    const minD = extraMinDist || (r + HOLE_R) * 2.2;
     if (holes.some(h => dist(h, candidate) < (h.r + r) * 2.0)) continue;
-    return { x, y, r, type,
-      // mouvement
-      moving: false,
-      vx: 0, vy: 0
-    };
+    return { x, y, r, type, moving: false, vx: 0, vy: 0 };
   }
   return null;
 }
 
-function randomVelocity(speed) {
-  const a = Math.random() * Math.PI * 2;
+function seededVelocity(speed) {
+  const a = rng() * Math.PI * 2;
   return { vx: Math.cos(a) * speed, vy: Math.sin(a) * speed };
 }
 
-function generateLevel(lvl) {
-  holes = [];
+// Place le trou vert loin de la bille ET derrière au moins 2 trous rouges
+function placeGreenHole(r) {
+  const margin = r + 14;
+  let bestCandidate = null;
+  let bestScore = -1;
+  // On génère 30 candidats et on garde celui qui maximise les trous rouges
+  // sur le chemin bille→trou vert
+  for (let k = 0; k < 30; k++) {
+    const x = margin + rng() * (W - margin * 2);
+    const y = margin + rng() * (H - margin * 2);
+    const candidate = { x, y };
+    if (Math.hypot(x - marble.x, y - marble.y) < W * 0.35) continue;
+    if (holes.some(h => dist(h, candidate) < (h.r + r) * 2.0)) continue;
 
-  // Trou vert
+    // Compte les trous rouges proches du segment bille→candidat
+    let score = 0;
+    const mx = marble.x, my = marble.y;
+    const dx = x - mx, dy = y - my;
+    const len = Math.hypot(dx, dy);
+    for (const h of holes) {
+      if (h.type !== 'red') continue;
+      // Distance point-segment
+      const t = Math.max(0, Math.min(1, ((h.x-mx)*dx + (h.y-my)*dy) / (len*len)));
+      const px = mx + t*dx - h.x;
+      const py = my + t*dy - h.y;
+      if (Math.hypot(px, py) < h.r + r + 40) score++;
+    }
+    if (score > bestScore) { bestScore = score; bestCandidate = { x, y }; }
+  }
+  if (!bestCandidate) return placeHole(r, 'green');
+  return { x: bestCandidate.x, y: bestCandidate.y, r, type: 'green', moving: false, vx: 0, vy: 0 };
+}
+
+function generateLevel(lvl) {
+  // Seed déterministe par niveau → même disposition pour tous
+  rng = mulberry32(lvl * 0xDEADBEEF + 0x12345678);
+
+  holes = [];
+  const count   = redHoleCount(lvl);
+  const nMoving = movingRedCount(lvl);
+  const speed   = 0.5 + Math.max(0, lvl - 5) * 0.12;
+
+  // 1. Gros trou rouge
+  const bigHole = placeHole(HOLE_BIG, 'red');
+  if (bigHole) {
+    if (lvl >= 9) {
+      const v = seededVelocity(speed);
+      bigHole.moving = true; bigHole.vx = v.vx; bigHole.vy = v.vy;
+    }
+    holes.push(bigHole);
+  }
+
+  // 2. Petits trous rouges
+  let smallPlaced = 0;
+  while (smallPlaced < count - 1) {
+    const h = placeHole(HOLE_R, 'red');
+    if (!h) break;
+    if (smallPlaced < nMoving) {
+      const v = seededVelocity(speed);
+      h.moving = true; h.vx = v.vx; h.vy = v.vy;
+    }
+    holes.push(h);
+    smallPlaced++;
+  }
+
+  // 3. Trou vert — placé en dernier pour maximiser les obstacles sur le chemin
   const greenR = HOLE_R + 2;
-  const gh = placeHole(greenR, 'green');
+  const gh = placeGreenHole(greenR);
   if (gh) {
     if (greenMoves(lvl)) {
-      const v = randomVelocity(0.9);
+      const v = seededVelocity(0.9);
       gh.moving = true; gh.vx = v.vx; gh.vy = v.vy;
     }
     holes.push(gh);
-  }
-
-  // Trous rouges
-  const count   = redHoleCount(lvl);
-  const nMoving = movingRedCount(lvl);
-  let bigDone   = false;
-  let placed    = 0;
-
-  while (placed < count) {
-    const isBig = !bigDone;
-    const r = isBig ? HOLE_BIG : HOLE_R;
-    const h = placeHole(r, 'red');
-    if (!h) break;
-
-    // Les premiers nMoving trous (sauf le gros) sont mobiles
-    const isMoving = !isBig && (placed - (bigDone ? 0 : 1)) < nMoving
-                   || (isBig && lvl >= 9);
-    if (isMoving) {
-      const speed = 0.5 + (lvl - 5) * 0.12;
-      const v = randomVelocity(speed);
-      h.moving = true; h.vx = v.vx; h.vy = v.vy;
-    }
-
-    holes.push(h);
-    if (!bigDone) bigDone = true;
-    placed++;
   }
 }
 
