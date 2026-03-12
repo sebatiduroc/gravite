@@ -462,6 +462,16 @@ function launchGame() {
   playerPseudo = val;
   localStorage.setItem('gravite_pseudo', val);
   if (window._requestGyro) window._requestGyro();
+
+  // ⚠️ TEMPORAIRE — accès niveau direct pour séb
+  if (val.toLowerCase() === 'séb' || val.toLowerCase() === 'seb') {
+    const lvl = parseInt(prompt(`Niveau de départ ? (1-${MAX_LEVEL})`, '1'), 10);
+    if (!isNaN(lvl) && lvl >= 1 && lvl <= MAX_LEVEL) {
+      startGame(lvl, false);
+      return;
+    }
+  }
+
   startGame(1, false);
 }
 
@@ -635,53 +645,60 @@ function generateSquares(lvl) {
 
 // Place le trou vert de l'autre côté du carré central par rapport à la bille (niveaux 11-12)
 // ou entre les deux carrés (niveaux 13-14), ou au-delà des 3 carrés (niveau 15)
-function placeGreenHoleLvl(r, lvl) {
-  const margin = r + 14;
-  const mx = marble.x, my = marble.y;
-
-  if (lvl === 11 || lvl === 12) {
-    // De l'autre côté du carré central : bille en haut-gauche → vert en bas-droite
-    const sq = squares[0];
-    // Cherche une position dans le quadrant opposé à la bille par rapport au centre
-    const cx = W / 2, cy = H / 2;
-    const signX = mx < cx ? 1 : -1;
-    const signY = my < cy ? 1 : -1;
-    for (let k = 0; k < 200; k++) {
-      const x = cx + signX * (sq.size / 2 + r + 10 + rng() * (W * 0.35));
-      const y = cy + signY * (sq.size / 2 + r + 10 + rng() * (H * 0.35));
-      if (x < margin || x > W - margin || y < margin || y > H - margin) continue;
-      if (squares.some(sq => insideSquare(x, y, r, sq))) continue;
-      if (holes.some(h => dist(h, {x,y}) < (h.r + r) * 2.0)) continue;
-      if (Math.hypot(x - mx, y - my) < W * 0.4) continue;
-      return { x, y, r, type: 'green', moving: false, vx: 0, vy: 0 };
-    }
-  } else if (lvl === 13 || lvl === 14) {
-    // Entre les deux carrés (couloir horizontal)
-    const sq1 = squares[0], sq2 = squares[1];
-    const midX = (sq1.x + sq2.x) / 2;
-    const midY = H / 2;
-    for (let k = 0; k < 200; k++) {
-      const x = midX + (rng() - 0.5) * (sq2.x - sq1.x - sq1.size - r * 2) * 0.8;
-      const y = midY + (rng() - 0.5) * H * 0.25;
-      if (x < margin || x > W - margin || y < margin || y > H - margin) continue;
-      if (squares.some(sq => insideSquare(x, y, r, sq))) continue;
-      if (holes.some(h => dist(h, {x,y}) < (h.r + r) * 2.0)) continue;
-      if (Math.hypot(x - mx, y - my) < W * 0.35) continue;
-      return { x, y, r, type: 'green', moving: false, vx: 0, vy: 0 };
-    }
-  } else if (lvl === 15) {
-    // Au-delà des 3 carrés : zone basse
+function tryPlaceGreen(r, mx, my, minDist, xMin, xMax, yMin, yMax) {
+  // Tente de placer le trou vert dans une zone donnée, avec distance min à la bille
+  // Relâche progressivement la contrainte de distance si besoin
+  for (let pass = 0; pass < 3; pass++) {
+    const md = minDist * (1 - pass * 0.2);
     for (let k = 0; k < 300; k++) {
-      const x = margin + rng() * (W - margin * 2);
-      const y = H * 0.6 + rng() * H * 0.3;
-      if (x < margin || x > W - margin || y < margin || y > H - margin) continue;
+      const x = xMin + rng() * (xMax - xMin);
+      const y = yMin + rng() * (yMax - yMin);
+      if (x < r + 10 || x > W - r - 10 || y < r + 10 || y > H - r - 10) continue;
       if (squares.some(sq => insideSquare(x, y, r, sq))) continue;
-      if (holes.some(h => dist(h, {x,y}) < (h.r + r) * 2.0)) continue;
-      if (Math.hypot(x - mx, y - my) < W * 0.45) continue;
+      if (holes.some(h => dist(h, {x,y}) < (h.r + r) * 1.8)) continue;
+      if (Math.hypot(x - mx, y - my) < md) continue;
       return { x, y, r, type: 'green', moving: false, vx: 0, vy: 0 };
     }
   }
-  return placeGreenHole(r); // fallback
+  return null;
+}
+
+function placeGreenHoleLvl(r, lvl) {
+  const mx = marble.x, my = marble.y;
+  const margin = r + 10;
+  let result = null;
+
+  if (lvl === 11 || lvl === 12) {
+    // Trou vert de l'autre côté du carré central
+    // La bille est en haut-gauche → on cherche en bas-droite
+    const cx = W / 2, cy = H / 2;
+    const signX = mx < cx ? 1 : -1;
+    const signY = my < cy ? 1 : -1;
+    const half = squares[0].size / 2;
+    const xA = signX > 0 ? cx + half + r + 5 : margin;
+    const xB = signX > 0 ? W - margin        : cx - half - r - 5;
+    const yA = signY > 0 ? cy + half + r + 5 : margin;
+    const yB = signY > 0 ? H - margin        : cy - half - r - 5;
+    result = tryPlaceGreen(r, mx, my, W * 0.38, xA, xB, yA, yB);
+
+  } else if (lvl === 13 || lvl === 14) {
+    // Entre les deux carrés : couloir vertical central
+    const sq1 = squares[0], sq2 = squares[1];
+    const xA = sq1.x + sq1.size / 2 + r + 5;
+    const xB = sq2.x - sq2.size / 2 - r - 5;
+    result = tryPlaceGreen(r, mx, my, W * 0.32, xA, xB, margin, H - margin);
+    // Si le couloir est trop étroit, chercher partout sauf dans les carrés
+    if (!result) result = tryPlaceGreen(r, mx, my, W * 0.32, margin, W - margin, margin, H - margin);
+
+  } else if (lvl === 15) {
+    // Zone basse (en dessous des carrés du bas)
+    const yA = H * 0.55;
+    result = tryPlaceGreen(r, mx, my, W * 0.4, margin, W - margin, yA, H - margin);
+    if (!result) result = tryPlaceGreen(r, mx, my, W * 0.3, margin, W - margin, margin, H - margin);
+  }
+
+  // Fallback ultime : placement libre
+  return result || placeGreenHole(r);
 }
 
 function generateLevel(lvl) {
