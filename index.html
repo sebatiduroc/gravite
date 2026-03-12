@@ -272,22 +272,25 @@ function generateLevel(lvl) {
   const gy = H * 0.65 + Math.random() * H * 0.2;
   holes.push({ x: gx, y: gy, r: HOLE_R + 2, type: 'green' });
 
-  // Red holes
-  const count = RED_HOLES + Math.min(lvl - 1, 4);
+  // 5 trous rouges, le premier est 50% plus grand
+  const count = 5;
+  let bigDone = false;
   let attempts = 0;
   while (holes.filter(h => h.type === 'red').length < count && attempts < 2000) {
     attempts++;
     const x = margin + Math.random() * (W - margin * 2);
     const y = margin + Math.random() * (H - margin * 2);
-    const candidate = { x, y, r: HOLE_R, type: 'red' };
+    const r = !bigDone ? HOLE_R * 1.5 : HOLE_R;
+    const candidate = { x, y, r, type: 'red' };
 
-    // Not too close to start
-    if (Math.hypot(x - marble.x, y - marble.y) < 80) continue;
+    // Pas trop proche du départ
+    if (Math.hypot(x - marble.x, y - marble.y) < 100) continue;
 
-    // Not overlapping other holes
-    if (holes.some(h => dist(h, candidate) < minDist)) continue;
+    // Pas de chevauchement
+    if (holes.some(h => dist(h, candidate) < (h.r + r) * 1.8)) continue;
 
     holes.push(candidate);
+    if (!bigDone) bigDone = true;
   }
 }
 
@@ -473,14 +476,6 @@ function physics() {
       sinkHole     = h;
       sinkProgress = 0;
       return;
-    }
-    // Attraction near hole rim
-    if (d < h.r + marble.r * 2) {
-      const pull = (h.r + marble.r * 2 - d) * 0.015;
-      const dx = (h.x - marble.x) / d;
-      const dy = (h.y - marble.y) / d;
-      marble.vx += dx * pull;
-      marble.vy += dy * pull;
     }
   }
 }
