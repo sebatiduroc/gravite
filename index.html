@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>GRAVITÉ — Jeu de bille gyroscope</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --wood-light: #d4a96a;
+    --wood-mid:   #b8833a;
+    --wood-dark:  #7a4f1e;
+    --wood-grain: #c49550;
+    --hole-red:   #cc2200;
+    --hole-green: #00aa44;
+    --marble-top: #e8e8f8;
+    --ui-bg:      #1a0e05;
+    --ui-text:    #f0d8a0;
+    --ui-accent:  #e8a020;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
+
+  body {
+    background: var(--ui-bg);
+    font-family: 'DM Mono', monospace;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── HUD ── */
+  #hud {
+    width: 100%;
+    max-width: 500px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px 8px;
+    z-index: 20;
+  }
+
+  #hud .label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--ui-accent);
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+
+  #hud .value {
+    font-family: 'Syne', sans-serif;
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--ui-text);
+    line-height: 1;
+  }
+
+  #hud .block { text-align: center; }
+
+  /* ── BOARD WRAPPER ── */
+  #board-wrap {
+    position: relative;
+    flex: 1;
+    width: 100%;
+    max-width: 500px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 16px 16px;
+  }
+
+  /* ── CANVAS ── */
+  #canvas {
+    display: block;
+    border-radius: 12px;
+    box-shadow:
+      0 0 0 3px var(--wood-dark),
+      0 0 0 6px var(--wood-mid),
+      0 8px 32px rgba(0,0,0,0.7);
+    cursor: none;
+  }
+
+  /* ── OVERLAYS ── */
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 20px;
+    background: rgba(10,5,0,0.88);
+    backdrop-filter: blur(6px);
+    padding: 30px;
+    text-align: center;
+  }
+  .overlay.active { display: flex; }
+
+  .overlay h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(28px, 8vw, 48px);
+    font-weight: 800;
+    color: var(--ui-text);
+    line-height: 1.1;
+  }
+
+  .overlay h1 span { color: var(--ui-accent); }
+
+  .overlay p {
+    font-size: 13px;
+    color: var(--ui-text);
+    opacity: 0.6;
+    max-width: 280px;
+    line-height: 1.7;
+    letter-spacing: 0.5px;
+  }
+
+  .overlay .result-time {
+    font-family: 'Syne', sans-serif;
+    font-size: 48px;
+    font-weight: 800;
+    color: var(--ui-accent);
+  }
+
+  .btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--ui-bg);
+    background: var(--ui-accent);
+    border: none;
+    border-radius: 6px;
+    padding: 14px 32px;
+    cursor: pointer;
+    transition: transform 0.1s, opacity 0.1s;
+  }
+  .btn:active { transform: scale(0.96); opacity: 0.85; }
+
+  .btn.secondary {
+    background: transparent;
+    color: var(--ui-text);
+    border: 1px solid rgba(240,216,160,0.3);
+  }
+
+  #level-badge {
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--ui-accent);
+    text-transform: uppercase;
+    opacity: 0.5;
+  }
+
+  /* iOS permission hint */
+  #ios-hint {
+    font-size: 11px;
+    color: var(--ui-text);
+    opacity: 0.4;
+    margin-top: -10px;
+  }
+</style>
+</head>
+<body>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="block">
+    <div class="label">Niveau</div>
+    <div class="value" id="level-disp">1</div>
+  </div>
+  <div class="block">
+    <div class="label">Temps</div>
+    <div class="value" id="timer-disp">0.0</div>
+  </div>
+  <div class="block">
+    <div class="label">Record</div>
+    <div class="value" id="best-disp">—</div>
+  </div>
+</div>
+
+<div id="board-wrap">
+  <canvas id="canvas"></canvas>
+</div>
+
+<!-- START SCREEN -->
+<div class="overlay active" id="screen-start">
+  <h1>GRA<span>VITÉ</span></h1>
+  <p>Inclinez votre téléphone pour guider la bille.<br>Évitez les trous <strong style="color:#ff4422">rouges</strong>, atteignez le trou <strong style="color:#00cc55">vert</strong>.</p>
+  <button class="btn" id="btn-start">Commencer</button>
+  <p id="ios-hint">Sur iPhone, une permission gyroscope sera demandée.</p>
+  <p style="font-size:11px;opacity:0.3;letter-spacing:1px">← TOUCHES DIRECTIONNELLES SUR ORDINATEUR →</p>
+</div>
+
+<!-- WIN SCREEN -->
+<div class="overlay" id="screen-win">
+  <h1>BRAVO <span>!</span></h1>
+  <div class="result-time" id="win-time">0.0s</div>
+  <p id="win-msg">Nouveau record !</p>
+  <button class="btn" id="btn-next">Niveau suivant</button>
+  <button class="btn secondary" id="btn-restart-win">Rejouer ce niveau</button>
+</div>
+
+<!-- LOSE SCREEN -->
+<div class="overlay" id="screen-lose">
+  <h1>DANS <span>LE TROU</span></h1>
+  <p>La bille a chuté dans un trou rouge.</p>
+  <button class="btn" id="btn-retry">Réessayer</button>
+</div>
+
+<script>
+// ════════════════════════════════════════════════
+//  CONFIG
+// ════════════════════════════════════════════════
+const MARBLE_R   = 14;
+const HOLE_R     = 18;
+const FRICTION   = 0.985;
+const GRAVITY    = 0.5;   // multiplier for tilt→accel
+const MAX_SPEED  = 12;
+const RED_HOLES  = 11;
+
+// ════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+
+let W, H;
+let marble = { x:0, y:0, vx:0, vy:0, r: MARBLE_R };
+let holes  = [];   // { x, y, r, type:'red'|'green' }
+let tiltX  = 0, tiltY = 0;
+let keysDown = {};
+let running  = false;
+let startTime, elapsed, bestTimes = {};
+let level    = 1;
+let animId;
+let sinkHole = null;  // hole marble is falling into
+let sinkProgress = 0;
+
+// ════════════════════════════════════════════════
+//  RESIZE
+// ════════════════════════════════════════════════
+function resize() {
+  const wrap = document.getElementById('board-wrap');
+  const maxW = Math.min(wrap.clientWidth - 32, 500);
+  const maxH = Math.min(wrap.clientHeight - 10, 620);
+  const size = Math.min(maxW, maxH);
+  canvas.width  = size;
+  canvas.height = size;
+  W = H = size;
+}
+
+// ════════════════════════════════════════════════
+//  LEVEL GENERATION
+// ════════════════════════════════════════════════
+function dist(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function generateLevel(lvl) {
+  holes = [];
+  const margin = HOLE_R + 10;
+  const minDist = HOLE_R * 3.2;
+
+  // Green hole — bottom right quadrant
+  const gx = W * 0.65 + Math.random() * W * 0.2;
+  const gy = H * 0.65 + Math.random() * H * 0.2;
+  holes.push({ x: gx, y: gy, r: HOLE_R + 2, type: 'green' });
+
+  // Red holes
+  const count = RED_HOLES + Math.min(lvl - 1, 4);
+  let attempts = 0;
+  while (holes.filter(h => h.type === 'red').length < count && attempts < 2000) {
+    attempts++;
+    const x = margin + Math.random() * (W - margin * 2);
+    const y = margin + Math.random() * (H - margin * 2);
+    const candidate = { x, y, r: HOLE_R, type: 'red' };
+
+    // Not too close to start
+    if (Math.hypot(x - marble.x, y - marble.y) < 80) continue;
+
+    // Not overlapping other holes
+    if (holes.some(h => dist(h, candidate) < minDist)) continue;
+
+    holes.push(candidate);
+  }
+}
+
+function resetMarble() {
+  marble.x  = W * 0.12;
+  marble.y  = H * 0.12;
+  marble.vx = 0;
+  marble.vy = 0;
+  sinkHole     = null;
+  sinkProgress = 0;
+}
+
+// ════════════════════════════════════════════════
+//  WOOD TEXTURE (procedural)
+// ════════════════════════════════════════════════
+let woodPattern = null;
+function buildWoodPattern() {
+  const off = document.createElement('canvas');
+  off.width = off.height = 200;
+  const c = off.getContext('2d');
+  c.fillStyle = '#c49550';
+  c.fillRect(0, 0, 200, 200);
+
+  // grain lines
+  for (let i = 0; i < 40; i++) {
+    const y = (i / 40) * 220 - 10;
+    const wave = Math.random() * 6 - 3;
+    c.beginPath();
+    c.moveTo(0, y);
+    for (let x = 0; x <= 200; x += 8) {
+      c.lineTo(x, y + Math.sin(x * 0.08 + wave) * 3 + Math.random() * 1.5);
+    }
+    c.strokeStyle = `rgba(${100 + Math.random()*40|0},${60 + Math.random()*20|0},10,${0.12 + Math.random() * 0.12})`;
+    c.lineWidth = 1 + Math.random() * 1.5;
+    c.stroke();
+  }
+  woodPattern = ctx.createPattern(off, 'repeat');
+}
+
+// ════════════════════════════════════════════════
+//  DRAW
+// ════════════════════════════════════════════════
+function drawBoard() {
+  // Wood surface
+  ctx.fillStyle = woodPattern || '#c49550';
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle vignette
+  const vignette = ctx.createRadialGradient(W/2, H/2, W*0.3, W/2, H/2, W*0.85);
+  vignette.addColorStop(0, 'rgba(0,0,0,0)');
+  vignette.addColorStop(1, 'rgba(0,0,0,0.35)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawHole(h) {
+  // Outer shadow
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.7)';
+  ctx.shadowBlur  = 10;
+  ctx.shadowOffsetY = 3;
+
+  // Hole pit
+  const grad = ctx.createRadialGradient(h.x, h.y, 0, h.x, h.y, h.r);
+  if (h.type === 'green') {
+    grad.addColorStop(0, '#002210');
+    grad.addColorStop(0.6, '#003818');
+    grad.addColorStop(1, '#00aa44');
+  } else {
+    grad.addColorStop(0, '#1a0000');
+    grad.addColorStop(0.6, '#330000');
+    grad.addColorStop(1, '#cc2200');
+  }
+
+  ctx.beginPath();
+  ctx.arc(h.x, h.y, h.r, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.restore();
+
+  // Rim highlight
+  ctx.beginPath();
+  ctx.arc(h.x, h.y, h.r, 0, Math.PI * 2);
+  ctx.strokeStyle = h.type === 'green' ? 'rgba(0,200,80,0.5)' : 'rgba(200,40,0,0.5)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Inner glow dot
+  if (h.type === 'green') {
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,255,100,0.5)';
+    ctx.fill();
+  }
+}
+
+function drawMarble() {
+  if (sinkHole) {
+    // Shrink into hole
+    const t = sinkProgress;
+    const r = marble.r * (1 - t);
+    const mx = marble.x + (sinkHole.x - marble.x) * t;
+    const my = marble.y + (sinkHole.y - marble.y) * t;
+    if (r <= 0) return;
+    drawMarbleAt(mx, my, r);
+    return;
+  }
+  drawMarbleAt(marble.x, marble.y, marble.r);
+}
+
+function drawMarbleAt(x, y, r) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur  = 8;
+  ctx.shadowOffsetY = 3;
+
+  // Base sphere gradient
+  const grad = ctx.createRadialGradient(x - r*0.3, y - r*0.35, r*0.05, x, y, r);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.25, '#d0d8f0');
+  grad.addColorStop(0.65, '#8090c0');
+  grad.addColorStop(1, '#303860');
+
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI*2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.restore();
+
+  // Specular highlight
+  ctx.beginPath();
+  ctx.arc(x - r*0.28, y - r*0.30, r*0.25, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.fill();
+}
+
+// ════════════════════════════════════════════════
+//  PHYSICS
+// ════════════════════════════════════════════════
+function physics() {
+  if (!running || sinkHole) return;
+
+  // Keyboard fallback
+  const KB = 0.6;
+  if (keysDown['ArrowLeft'])  tiltX = -KB;
+  if (keysDown['ArrowRight']) tiltX =  KB;
+  if (keysDown['ArrowUp'])    tiltY = -KB;
+  if (keysDown['ArrowDown'])  tiltY =  KB;
+  if (!keysDown['ArrowLeft'] && !keysDown['ArrowRight']) tiltX *= 0.85;
+  if (!keysDown['ArrowUp']   && !keysDown['ArrowDown'])  tiltY *= 0.85;
+
+  // Apply tilt
+  marble.vx += tiltX * GRAVITY;
+  marble.vy += tiltY * GRAVITY;
+
+  // Friction
+  marble.vx *= FRICTION;
+  marble.vy *= FRICTION;
+
+  // Speed cap
+  const speed = Math.hypot(marble.vx, marble.vy);
+  if (speed > MAX_SPEED) {
+    marble.vx = (marble.vx / speed) * MAX_SPEED;
+    marble.vy = (marble.vy / speed) * MAX_SPEED;
+  }
+
+  // Move
+  marble.x += marble.vx;
+  marble.y += marble.vy;
+
+  // Wall bounce
+  const pad = marble.r;
+  if (marble.x < pad)     { marble.x = pad;     marble.vx *= -0.5; }
+  if (marble.x > W - pad) { marble.x = W - pad; marble.vx *= -0.5; }
+  if (marble.y < pad)     { marble.y = pad;      marble.vy *= -0.5; }
+  if (marble.y > H - pad) { marble.y = H - pad;  marble.vy *= -0.5; }
+
+  // Hole collision
+  for (const h of holes) {
+    const d = dist(marble, h);
+    if (d < h.r - marble.r * 0.4) {
+      // Sucked in!
+      sinkHole     = h;
+      sinkProgress = 0;
+      return;
+    }
+    // Attraction near hole rim
+    if (d < h.r + marble.r * 2) {
+      const pull = (h.r + marble.r * 2 - d) * 0.015;
+      const dx = (h.x - marble.x) / d;
+      const dy = (h.y - marble.y) / d;
+      marble.vx += dx * pull;
+      marble.vy += dy * pull;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════
+//  GAME LOOP
+// ════════════════════════════════════════════════
+function loop(ts) {
+  animId = requestAnimationFrame(loop);
+
+  // Timer
+  if (running && !sinkHole) {
+    elapsed = (performance.now() - startTime) / 1000;
+    document.getElementById('timer-disp').textContent = elapsed.toFixed(1);
+  }
+
+  // Sink animation
+  if (sinkHole) {
+    sinkProgress += 0.04;
+    if (sinkProgress >= 1) {
+      sinkProgress = 1;
+      const type = sinkHole.type;
+      sinkHole = null;
+      running  = false;
+      if (type === 'green') onWin();
+      else                  onLose();
+      return;
+    }
+  }
+
+  physics();
+
+  // Render
+  drawBoard();
+  holes.forEach(drawHole);
+  drawMarble();
+}
+
+// ════════════════════════════════════════════════
+//  WIN / LOSE
+// ════════════════════════════════════════════════
+function onWin() {
+  const t = elapsed;
+  const prev = bestTimes[level];
+  const isRecord = !prev || t < prev;
+  if (isRecord) bestTimes[level] = t;
+
+  document.getElementById('win-time').textContent = t.toFixed(2) + 's';
+  document.getElementById('win-msg').textContent  = isRecord ? '🏆 Nouveau record !' : `Record : ${prev.toFixed(2)}s`;
+  document.getElementById('best-disp').textContent = (bestTimes[level] || t).toFixed(1);
+  showScreen('win');
+}
+
+function onLose() {
+  showScreen('lose');
+}
+
+// ════════════════════════════════════════════════
+//  SCREEN MANAGEMENT
+// ════════════════════════════════════════════════
+function showScreen(name) {
+  document.querySelectorAll('.overlay').forEach(o => o.classList.remove('active'));
+  if (name) document.getElementById('screen-' + name).classList.add('active');
+}
+
+// ════════════════════════════════════════════════
+//  START / RESTART
+// ════════════════════════════════════════════════
+function startGame(lvl) {
+  level = lvl || level;
+  document.getElementById('level-disp').textContent = level;
+
+  resize();
+  buildWoodPattern();
+  resetMarble();
+  generateLevel(level);
+  tiltX = tiltY = 0;
+
+  const best = bestTimes[level];
+  document.getElementById('best-disp').textContent = best ? best.toFixed(1) : '—';
+  document.getElementById('timer-disp').textContent = '0.0';
+
+  showScreen(null);
+  running   = true;
+  startTime = performance.now();
+  elapsed   = 0;
+
+  if (animId) cancelAnimationFrame(animId);
+  animId = requestAnimationFrame(loop);
+}
+
+// ════════════════════════════════════════════════
+//  GYROSCOPE
+// ════════════════════════════════════════════════
+function initGyro() {
+  if (typeof DeviceOrientationEvent === 'undefined') return;
+
+  const handler = (e) => {
+    // gamma = left/right tilt, beta = front/back tilt
+    const gamma = Math.max(-30, Math.min(30, e.gamma || 0));
+    const beta  = Math.max(-30, Math.min(30, (e.beta  || 0) - 20)); // -20° calibration
+    tiltX = gamma / 30;
+    tiltY = beta  / 30;
+  };
+
+  // iOS 13+ permission
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    // We'll request on the start button click
+    window._requestGyro = () => {
+      DeviceOrientationEvent.requestPermission().then(state => {
+        if (state === 'granted') window.addEventListener('deviceorientation', handler);
+      }).catch(console.error);
+    };
+    document.getElementById('ios-hint').textContent = '📱 iPhone détecté — permission gyroscope requise.';
+  } else {
+    window.addEventListener('deviceorientation', handler);
+    document.getElementById('ios-hint').style.display = 'none';
+  }
+}
+
+// ════════════════════════════════════════════════
+//  EVENTS
+// ════════════════════════════════════════════════
+document.getElementById('btn-start').addEventListener('click', () => {
+  if (window._requestGyro) window._requestGyro();
+  startGame(1);
+});
+
+document.getElementById('btn-next').addEventListener('click', () => {
+  startGame(level + 1);
+});
+
+document.getElementById('btn-restart-win').addEventListener('click', () => {
+  startGame(level);
+});
+
+document.getElementById('btn-retry').addEventListener('click', () => {
+  startGame(level);
+});
+
+document.addEventListener('keydown', e => { keysDown[e.key] = true;  });
+document.addEventListener('keyup',   e => { keysDown[e.key] = false; });
+
+window.addEventListener('resize', () => {
+  if (running) {
+    resize();
+    buildWoodPattern();
+    generateLevel(level); // regenerate with new size
+    resetMarble();
+    startTime = performance.now();
+  }
+});
+
+// Mouse/touch debug control (desktop)
+canvas.addEventListener('mousemove', (e) => {
+  if (!running) return;
+  const rect = canvas.getBoundingClientRect();
+  const cx = rect.left + W / 2;
+  const cy = rect.top  + H / 2;
+  const dx = (e.clientX - cx) / (W / 2);
+  const dy = (e.clientY - cy) / (H / 2);
+  // Only if no keyboard pressed
+  if (!Object.values(keysDown).some(Boolean)) {
+    tiltX = dx * 0.8;
+    tiltY = dy * 0.8;
+  }
+});
+
+canvas.addEventListener('mouseleave', () => { tiltX = 0; tiltY = 0; });
+
+// ════════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════════
+resize();
+initGyro();
+
+// Initial idle draw
+buildWoodPattern();
+resetMarble();
+generateLevel(1);
+drawBoard();
+holes.forEach(drawHole);
+drawMarble();
+</script>
+</body>
+</html>
