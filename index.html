@@ -358,15 +358,73 @@ function generateLevel(lvl) {
 }
 
 function moveHoles() {
-  for (const h of holes) {
-    if (!h.moving) continue;
+  const moving = holes.filter(h => h.moving);
+
+  // Déplacement
+  for (const h of moving) {
     h.x += h.vx;
     h.y += h.vy;
+    // Rebond sur les bords
     const m = h.r + 6;
-    if (h.x < m)     { h.x = m;     h.vx *= -1; }
-    if (h.x > W - m) { h.x = W - m; h.vx *= -1; }
-    if (h.y < m)     { h.y = m;     h.vy *= -1; }
-    if (h.y > H - m) { h.y = H - m; h.vy *= -1; }
+    if (h.x < m)     { h.x = m;     h.vx = Math.abs(h.vx);  }
+    if (h.x > W - m) { h.x = W - m; h.vx = -Math.abs(h.vx); }
+    if (h.y < m)     { h.y = m;     h.vy = Math.abs(h.vy);  }
+    if (h.y > H - m) { h.y = H - m; h.vy = -Math.abs(h.vy); }
+  }
+
+  // Rebonds entre trous mobiles (et avec les trous fixes)
+  for (let i = 0; i < holes.length; i++) {
+    for (let j = i + 1; j < holes.length; j++) {
+      const a = holes[i];
+      const b = holes[j];
+      if (!a.moving && !b.moving) continue; // deux fixes : rien à faire
+
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const d  = Math.hypot(dx, dy);
+      const minD = a.r + b.r;
+      if (d >= minD || d === 0) continue;
+
+      // Axe de collision normalisé
+      const nx = dx / d;
+      const ny = dy / d;
+
+      // Séparer pour éviter chevauchement
+      const overlap = minD - d;
+      if (a.moving && b.moving) {
+        a.x -= nx * overlap / 2;
+        a.y -= ny * overlap / 2;
+        b.x += nx * overlap / 2;
+        b.y += ny * overlap / 2;
+      } else if (a.moving) {
+        a.x -= nx * overlap;
+        a.y -= ny * overlap;
+      } else {
+        b.x += nx * overlap;
+        b.y += ny * overlap;
+      }
+
+      // Échange des composantes de vitesse sur l'axe de collision (rebond élastique)
+      if (a.moving && b.moving) {
+        const va = a.vx * nx + a.vy * ny;
+        const vb = b.vx * nx + b.vy * ny;
+        // Échange
+        a.vx += (vb - va) * nx;
+        a.vy += (vb - va) * ny;
+        b.vx += (va - vb) * nx;
+        b.vy += (va - vb) * ny;
+      } else if (a.moving) {
+        // b est fixe : a rebondit
+        const va = a.vx * nx + a.vy * ny;
+        a.vx -= 2 * va * nx;
+        a.vy -= 2 * va * ny;
+      } else {
+        // a est fixe : b rebondit
+        const vb = b.vx * nx + b.vy * ny;
+        b.vx -= 2 * vb * nx;
+        b.vy -= 2 * vb * ny;
+      }
+    }
   }
 }
 
