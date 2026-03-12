@@ -700,14 +700,24 @@ function placeGreenHoleLvl(r, lvl) {
     const yB = signY > 0 ? H - margin        : cy - half - r - 5;
     result = tryPlaceGreen(r, mx, my, W * 0.38, xA, xB, yA, yB);
 
-  } else if (lvl === 13 || lvl === 14) {
+  } else if (lvl === 13) {
     // Entre les deux carrés : couloir vertical central
     const sq1 = squares[0], sq2 = squares[1];
     const xA = sq1.x + sq1.size / 2 + r + 5;
     const xB = sq2.x - sq2.size / 2 - r - 5;
     result = tryPlaceGreen(r, mx, my, W * 0.32, xA, xB, margin, H - margin);
-    // Si le couloir est trop étroit, chercher partout sauf dans les carrés
     if (!result) result = tryPlaceGreen(r, mx, my, W * 0.32, margin, W - margin, margin, H - margin);
+
+  } else if (lvl === 14) {
+    // De l'autre côté du plateau par rapport à la bille (coin opposé)
+    const signX = mx < W / 2 ? 1 : -1;
+    const signY = my < H / 2 ? 1 : -1;
+    const xA = signX > 0 ? W * 0.55 : margin;
+    const xB = signX > 0 ? W - margin : W * 0.45;
+    const yA = signY > 0 ? H * 0.55 : margin;
+    const yB = signY > 0 ? H - margin : H * 0.45;
+    result = tryPlaceGreen(r, mx, my, W * 0.55, xA, xB, yA, yB);
+    if (!result) result = tryPlaceGreen(r, mx, my, W * 0.45, margin, W - margin, margin, H - margin);
 
   } else if (lvl === 15) {
     // Zone basse (en dessous des carrés du bas)
@@ -1196,17 +1206,30 @@ function loop(ts) {
       } else {
         // Visible pendant GREEN_SHOW_DUR secondes
         if (gh.hidden) {
-          // Repositionner loin de la bille au moment de l'apparition
+          // Repositionner dans le coin opposé à la bille, loin et dans une zone libre
           const greenR = HOLE_R + 2;
           const margin = greenR + 14;
-          for (let k = 0; k < 300; k++) {
-            const nx = margin + Math.random() * (W - margin * 2);
-            const ny = margin + Math.random() * (H - margin * 2);
-            if (Math.hypot(nx - marble.x, ny - marble.y) < W * 0.4) continue;
-            if (squares.some(sq => insideSquare(nx, ny, greenR, sq))) continue;
-            if (holes.some(h => h !== gh && dist(h, {x:nx,y:ny}) < (h.r + greenR) * 1.5)) continue;
-            gh.x = nx; gh.y = ny;
-            break;
+          const signX = marble.x < W / 2 ? 1 : -1;
+          const signY = marble.y < H / 2 ? 1 : -1;
+          const xA = signX > 0 ? W * 0.5  : margin;
+          const xB = signX > 0 ? W - margin : W * 0.5;
+          const yA = signY > 0 ? H * 0.5  : margin;
+          const yB = signY > 0 ? H - margin : H * 0.5;
+          let placed = false;
+          // 3 passes avec distance décroissante si nécessaire
+          for (let pass = 0; pass < 3 && !placed; pass++) {
+            const minD = W * (0.55 - pass * 0.08);
+            for (let k = 0; k < 300; k++) {
+              const nx = xA + Math.random() * (xB - xA);
+              const ny = yA + Math.random() * (yB - yA);
+              if (nx < margin || nx > W - margin || ny < margin || ny > H - margin) continue;
+              if (Math.hypot(nx - marble.x, ny - marble.y) < minD) continue;
+              if (squares.some(sq => insideSquare(nx, ny, greenR, sq))) continue;
+              if (holes.some(h => h !== gh && dist(h, {x:nx,y:ny}) < (h.r + greenR) * 1.5)) continue;
+              gh.x = nx; gh.y = ny;
+              placed = true;
+              break;
+            }
           }
           gh.hidden = false;
         }
