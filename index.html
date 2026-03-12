@@ -179,7 +179,7 @@
     <div class="value" id="timer-disp">0.0</div>
   </div>
   <div class="block">
-    <div class="label">Record</div>
+    <div class="label">Meilleur</div>
     <div class="value" id="best-disp">—</div>
   </div>
 </div>
@@ -197,32 +197,58 @@
   <p style="font-size:11px;opacity:0.3;letter-spacing:1px">← TOUCHES DIRECTIONNELLES SUR ORDINATEUR →</p>
 </div>
 
-<!-- WIN SCREEN -->
+<!-- WIN SCREEN (niveau intermédiaire) -->
 <div class="overlay" id="screen-win">
-  <h1>BRAVO <span>!</span></h1>
-  <div class="result-time" id="win-time">0.0s</div>
-  <p id="win-msg">Nouveau record !</p>
-  <button class="btn" id="btn-next">Niveau suivant</button>
-  <button class="btn secondary" id="btn-restart-win">Rejouer ce niveau</button>
+  <h1>NIVEAU <span>PASSÉ !</span></h1>
+  <div style="font-size:13px;opacity:0.5;letter-spacing:2px;margin-bottom:4px">TEMPS DU NIVEAU</div>
+  <div class="result-time" id="win-level-time">0.0s</div>
+  <div style="font-size:13px;opacity:0.5;letter-spacing:2px;margin-top:8px;margin-bottom:4px">TEMPS CUMULÉ</div>
+  <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--ui-text)" id="win-total-time">0.0s</div>
+  <button class="btn" id="btn-next">Niveau suivant →</button>
+</div>
+
+<!-- FINAL SCREEN (fin du niveau 10) -->
+<div class="overlay" id="screen-final">
+  <h1>GRA<span>VITÉ</span></h1>
+  <div style="font-size:11px;letter-spacing:3px;opacity:0.4;margin-bottom:8px">TEMPS TOTAL — 10 NIVEAUX</div>
+  <div class="result-time" id="final-time">0.0s</div>
+  <p id="final-record">Nouveau record !</p>
+  <button class="btn" id="btn-replay">Recommencer</button>
 </div>
 
 <!-- LOSE SCREEN -->
 <div class="overlay" id="screen-lose">
   <h1>DANS <span>LE TROU</span></h1>
-  <p>La bille a chuté dans un trou rouge.</p>
-  <button class="btn" id="btn-retry">Réessayer</button>
+  <p>Partie terminée.<br>Temps cumulé : <strong id="lose-total-time">0.0s</strong></p>
+  <button class="btn" id="btn-restart-lose">Recommencer depuis le début</button>
 </div>
 
 <script>
 // ════════════════════════════════════════════════
 //  CONFIG
 // ════════════════════════════════════════════════
-const MARBLE_R   = 14;
-const HOLE_R     = 18;
-const FRICTION   = 0.985;
-const GRAVITY    = 0.5;   // multiplicateur inclinaison→accélération
-const MAX_SPEED  = 12;
-const RED_HOLES  = 11;
+const MARBLE_R  = 14;
+const HOLE_R    = 18;
+const HOLE_BIG  = HOLE_R * 1.5;  // trou géant
+const FRICTION  = 0.985;
+const GRAVITY   = 0.5;
+const MAX_SPEED = 12;
+const MAX_LEVEL = 10;
+
+// Nombre de trous rouges par niveau (niveaux 1-4 : +1 par niveau, 5-10 : 5 fixes)
+function redHoleCount(lvl) {
+  if (lvl <= 4) return 4 + lvl;   // 5,6,7,8
+  return 5;
+}
+// Nombre de trous rouges mobiles par niveau
+function movingRedCount(lvl) {
+  if (lvl < 5)  return 0;
+  if (lvl <= 5) return 1;
+  if (lvl <= 8) return lvl - 4;   // 6→2, 7→3, 8→4
+  return 5;                        // 9-10 : tous
+}
+// Le trou vert bouge-t-il ?
+function greenMoves(lvl) { return lvl >= 10; }
 
 // ════════════════════════════════════════════════
 //  STATE
@@ -232,14 +258,17 @@ const ctx    = canvas.getContext('2d');
 
 let W, H;
 let marble = { x:0, y:0, vx:0, vy:0, r: MARBLE_R };
-let holes  = [];   // { x, y, r, type:'rouge'|'vert' }
+let holes  = [];
 let tiltX  = 0, tiltY = 0;
 let keysDown = {};
 let running  = false;
-let startTime, elapsed, bestTimes = {};
+let levelStartTime;     // performance.now() au début du niveau
+let levelElapsed = 0;   // temps du niveau en cours
+let totalElapsed = 0;   // temps cumulé des niveaux précédents
+let bestTotal    = null; // meilleur temps total (run complet)
 let level    = 1;
 let animId;
-let sinkHole = null;  // trou dans lequel la bille tombe
+let sinkHole = null;
 let sinkProgress = 0;
 
 // ════════════════════════════════════════════════
@@ -262,35 +291,82 @@ function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function generateLevel(lvl) {
-  holes = [];
-  const margin = HOLE_R + 10;
-  const minDist = HOLE_R * 3.2;
-
-  // Green hole — bottom right quadrant
-  const gx = W * 0.65 + Math.random() * W * 0.2;
-  const gy = H * 0.65 + Math.random() * H * 0.2;
-  holes.push({ x: gx, y: gy, r: HOLE_R + 2, type: 'green' });
-
-  // 5 trous rouges, le premier est 50% plus grand
-  const count = 5;
-  let bigDone = false;
+function placeHole(r, type, extraMinDist) {
+  const margin = Math.max(r, HOLE_R) + 14;
   let attempts = 0;
-  while (holes.filter(h => h.type === 'red').length < count && attempts < 2000) {
+  while (attempts < 3000) {
     attempts++;
     const x = margin + Math.random() * (W - margin * 2);
     const y = margin + Math.random() * (H - margin * 2);
-    const r = !bigDone ? HOLE_R * 1.5 : HOLE_R;
-    const candidate = { x, y, r, type: 'red' };
-
-    // Pas trop proche du départ
+    const candidate = { x, y };
     if (Math.hypot(x - marble.x, y - marble.y) < 100) continue;
+    const minD = extraMinDist || (r + HOLE_R) * 2.2;
+    if (holes.some(h => dist(h, candidate) < (h.r + r) * 2.0)) continue;
+    return { x, y, r, type,
+      // mouvement
+      moving: false,
+      vx: 0, vy: 0
+    };
+  }
+  return null;
+}
 
-    // Pas de chevauchement
-    if (holes.some(h => dist(h, candidate) < (h.r + r) * 1.8)) continue;
+function randomVelocity(speed) {
+  const a = Math.random() * Math.PI * 2;
+  return { vx: Math.cos(a) * speed, vy: Math.sin(a) * speed };
+}
 
-    holes.push(candidate);
+function generateLevel(lvl) {
+  holes = [];
+
+  // Trou vert
+  const greenR = HOLE_R + 2;
+  const gh = placeHole(greenR, 'green');
+  if (gh) {
+    if (greenMoves(lvl)) {
+      const v = randomVelocity(0.9);
+      gh.moving = true; gh.vx = v.vx; gh.vy = v.vy;
+    }
+    holes.push(gh);
+  }
+
+  // Trous rouges
+  const count   = redHoleCount(lvl);
+  const nMoving = movingRedCount(lvl);
+  let bigDone   = false;
+  let placed    = 0;
+
+  while (placed < count) {
+    const isBig = !bigDone;
+    const r = isBig ? HOLE_BIG : HOLE_R;
+    const h = placeHole(r, 'red');
+    if (!h) break;
+
+    // Les premiers nMoving trous (sauf le gros) sont mobiles
+    const isMoving = !isBig && (placed - (bigDone ? 0 : 1)) < nMoving
+                   || (isBig && lvl >= 9);
+    if (isMoving) {
+      const speed = 0.5 + (lvl - 5) * 0.12;
+      const v = randomVelocity(speed);
+      h.moving = true; h.vx = v.vx; h.vy = v.vy;
+    }
+
+    holes.push(h);
     if (!bigDone) bigDone = true;
+    placed++;
+  }
+}
+
+function moveHoles() {
+  for (const h of holes) {
+    if (!h.moving) continue;
+    h.x += h.vx;
+    h.y += h.vy;
+    const m = h.r + 6;
+    if (h.x < m)     { h.x = m;     h.vx *= -1; }
+    if (h.x > W - m) { h.x = W - m; h.vx *= -1; }
+    if (h.y < m)     { h.y = m;     h.vy *= -1; }
+    if (h.y > H - m) { h.y = H - m; h.vy *= -1; }
   }
 }
 
@@ -488,8 +564,9 @@ function loop(ts) {
 
   // Timer
   if (running && !sinkHole) {
-    elapsed = (performance.now() - startTime) / 1000;
-    document.getElementById('timer-disp').textContent = elapsed.toFixed(1);
+    levelElapsed = (performance.now() - levelStartTime) / 1000;
+    const total = totalElapsed + levelElapsed;
+    document.getElementById('timer-disp').textContent = total.toFixed(1);
   }
 
   // Sink animation
@@ -507,6 +584,7 @@ function loop(ts) {
   }
 
   physics();
+  moveHoles();
 
   // Render
   drawBoard();
@@ -518,18 +596,30 @@ function loop(ts) {
 //  WIN / LOSE
 // ════════════════════════════════════════════════
 function onWin() {
-  const t = elapsed;
-  const prev = bestTimes[level];
-  const isRecord = !prev || t < prev;
-  if (isRecord) bestTimes[level] = t;
+  const levelTime = levelElapsed;
+  totalElapsed += levelTime;
 
-  document.getElementById('win-time').textContent = t.toFixed(2) + 's';
-  document.getElementById('win-msg').textContent  = isRecord ? '🏆 Nouveau record !' : `Record : ${prev.toFixed(2)}s`;
-  document.getElementById('best-disp').textContent = (bestTimes[level] || t).toFixed(1);
-  showScreen('win');
+  document.getElementById('timer-disp').textContent = totalElapsed.toFixed(1);
+
+  if (level >= MAX_LEVEL) {
+    // Partie terminée !
+    const isRecord = !bestTotal || totalElapsed < bestTotal;
+    if (isRecord) bestTotal = totalElapsed;
+    document.getElementById('final-time').textContent = totalElapsed.toFixed(2) + 's';
+    document.getElementById('final-record').textContent =
+      isRecord ? '🏆 Nouveau record !' : `Record : ${bestTotal.toFixed(2)}s`;
+    document.getElementById('best-disp').textContent = bestTotal.toFixed(1);
+    showScreen('final');
+  } else {
+    document.getElementById('win-level-time').textContent = levelTime.toFixed(2) + 's';
+    document.getElementById('win-total-time').textContent = totalElapsed.toFixed(2) + 's';
+    showScreen('win');
+  }
 }
 
 function onLose() {
+  const total = totalElapsed + levelElapsed;
+  document.getElementById('lose-total-time').textContent = total.toFixed(2) + 's';
   showScreen('lose');
 }
 
@@ -544,9 +634,12 @@ function showScreen(name) {
 // ════════════════════════════════════════════════
 //  START / RESTART
 // ════════════════════════════════════════════════
-function startGame(lvl) {
-  level = lvl || level;
-  document.getElementById('level-disp').textContent = level;
+function startGame(lvl, keepTotal) {
+  level = lvl || 1;
+  if (!keepTotal) totalElapsed = 0;  // nouveau run complet
+  levelElapsed = 0;
+
+  document.getElementById('level-disp').textContent = level + ' / ' + MAX_LEVEL;
 
   resize();
   buildWoodPattern();
@@ -554,14 +647,12 @@ function startGame(lvl) {
   generateLevel(level);
   tiltX = tiltY = 0;
 
-  const best = bestTimes[level];
-  document.getElementById('best-disp').textContent = best ? best.toFixed(1) : '—';
-  document.getElementById('timer-disp').textContent = '0.0';
+  document.getElementById('best-disp').textContent = bestTotal ? bestTotal.toFixed(1) : '—';
+  document.getElementById('timer-disp').textContent = totalElapsed.toFixed(1);
 
   showScreen(null);
-  running   = true;
-  startTime = performance.now();
-  elapsed   = 0;
+  running        = true;
+  levelStartTime = performance.now();
 
   if (animId) cancelAnimationFrame(animId);
   animId = requestAnimationFrame(loop);
@@ -601,19 +692,19 @@ function initGyro() {
 // ════════════════════════════════════════════════
 document.getElementById('btn-start').addEventListener('click', () => {
   if (window._requestGyro) window._requestGyro();
-  startGame(1);
+  startGame(1, false);
 });
 
 document.getElementById('btn-next').addEventListener('click', () => {
-  startGame(level + 1);
+  startGame(level + 1, true);  // garde le total
 });
 
-document.getElementById('btn-restart-win').addEventListener('click', () => {
-  startGame(level);
+document.getElementById('btn-replay').addEventListener('click', () => {
+  startGame(1, false);
 });
 
-document.getElementById('btn-retry').addEventListener('click', () => {
-  startGame(level);
+document.getElementById('btn-restart-lose').addEventListener('click', () => {
+  startGame(1, false);
 });
 
 document.addEventListener('keydown', e => { keysDown[e.key] = true;  });
@@ -652,7 +743,7 @@ canvas.addEventListener('mouseleave', () => { tiltX = 0; tiltY = 0; });
 resize();
 initGyro();
 
-// Initial idle draw
+// Affichage initial
 buildWoodPattern();
 resetMarble();
 generateLevel(1);
