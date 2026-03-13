@@ -450,7 +450,7 @@ async function saveLevel(lvl, levelSecs) {
     let r5  = bin.r5  || [];
     let r10 = bin.r10 || [];
     let r15 = bin.r15 || [];
-    const entry = { pseudo: playerPseudo, time: levelSecs, ts: new Date().toISOString() };
+    const entry = { pseudo: playerPseudo, time: totalElapsed, ts: new Date().toISOString() };
     if (lvl === 5)  r5  = mergeScore(r5,  entry);
     if (lvl === 10) r10 = mergeScore(r10, entry);
     if (lvl === 15) r15 = mergeScore(r15, entry);
