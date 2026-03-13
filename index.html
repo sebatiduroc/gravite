@@ -272,7 +272,7 @@
     <div class="value" id="timer-disp">0.0</div>
   </div>
   <div class="block">
-    <div class="label">Meilleur</div>
+    <div class="label">Record niv.</div>
     <div class="value" id="best-disp">—</div>
   </div>
 </div>
@@ -387,8 +387,8 @@ async function loadBinData() {
     if (totalAfter !== totalBefore) {
       await writeBin({ r5, r10, r15 });
     }
-    return { r5, r10, r15 };
-  } catch(e) { return { r5:[], r10:[], r15:[] }; }
+    return { r5, r10, r15, bests: bin.bests || {} };
+  } catch(e) { return { r5:[], r10:[], r15:[], bests:{} }; }
 }
 
 async function writeBin(data) {
@@ -406,44 +406,58 @@ function checkPseudo(val) {
   warn.style.display = exists ? 'block' : 'none';
 }
 
-// Insère un score dans un tableau, dédoublonne par pseudo (meilleur score), trie, garde top 10
+// Insère/met à jour un score dans un tableau :
+// - ignore si le pseudo a déjà un meilleur score
+// - sinon insère/remplace, purge >30j, trie, retourne le tableau
 function mergeScore(arr, entry) {
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const purged = arr.filter(e => e.ts >= cutoff);
-  const byPseudo = {};
-  [...purged, entry].forEach(e => {
-    if (!byPseudo[e.pseudo] || e.time < byPseudo[e.pseudo].time) byPseudo[e.pseudo] = e;
-  });
-  return Object.values(byPseudo).sort((a, b) => a.time - b.time);
+  // Purge d'abord
+  let purged = arr.filter(e => e.ts && e.ts >= cutoff);
+  // Chercher si ce pseudo a déjà un score
+  const existing = purged.find(e => e.pseudo === entry.pseudo);
+  if (existing && existing.time <= entry.time) {
+    // Score existant meilleur ou égal → on ne touche à rien
+    return purged.sort((a, b) => a.time - b.time);
+  }
+  // Supprimer l'ancien score du pseudo s'il existe
+  purged = purged.filter(e => e.pseudo !== entry.pseudo);
+  // Ajouter le nouveau
+  purged.push(entry);
+  return purged.sort((a, b) => a.time - b.time);
 }
 
-// Sauvegarde silencieuse à un palier (5 ou 10), sans bloquer le jeu
-async function saveMilestone(palier, totalSecs) {
-  if (playerPseudo.toLowerCase() === 'test') return;
+// Sauvegarde silencieuse à chaque niveau passé :
+// - met à jour bests[lvl] si meilleur temps mondial
+// - met à jour le leaderboard r5/r10/r15 aux paliers 5, 10, 15
+// - retourne r15 si lvl === 15, sinon null
+async function saveLevel(lvl, levelSecs) {
+  if (playerPseudo.toLowerCase() === 'test') return lvl === 15 ? [] : null;
   try {
     const r = await fetch(`${JBIN}/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': API_KEY } });
     const d = await r.json();
     const bin = d.record || {};
-    const key = palier === 5 ? 'r5' : 'r10';
-    const arr = bin[key] || [];
-    const entry = { pseudo: playerPseudo, time: totalSecs, ts: new Date().toISOString() };
-    const updated = mergeScore(arr, entry);
-    await writeBin({ r5: bin.r5 || [], r10: bin.r10 || [], r15: bin.r15 || [], [key]: updated });
-  } catch {}
-}
+    const bests = bin.bests || {};
+    const k = String(lvl);
 
-// Sauvegarde le score final (niveau 15) et retourne le tableau r15 mis à jour
-async function saveScore(totalSecs) {
-  if (playerPseudo.toLowerCase() === 'test') return [];
-  try {
-    const r = await fetch(`${JBIN}/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': API_KEY } });
-    const d = await r.json();
-    const bin = d.record || {};
-    const entry = { pseudo: playerPseudo, time: totalSecs, ts: new Date().toISOString() };
-    const r15 = mergeScore(bin.r15 || [], entry);
-    await writeBin({ r5: bin.r5 || [], r10: bin.r10 || [], r15 });
-    return r15;
-  } catch { return null; }
+    // Mettre à jour le record mondial si meilleur
+    if (!bests[k] || levelSecs < bests[k]) {
+      bests[k] = levelSecs;
+      bestByLevel[lvl] = levelSecs;
+      document.getElementById('best-disp').textContent = levelSecs.toFixed(1);
+    }
+
+    // Leaderboard aux paliers 5, 10, 15
+    let r5  = bin.r5  || [];
+    let r10 = bin.r10 || [];
+    let r15 = bin.r15 || [];
+    const entry = { pseudo: playerPseudo, time: levelSecs, ts: new Date().toISOString() };
+    if (lvl === 5)  r5  = mergeScore(r5,  entry);
+    if (lvl === 10) r10 = mergeScore(r10, entry);
+    if (lvl === 15) r15 = mergeScore(r15, entry);
+
+    await writeBin({ r5, r10, r15, bests });
+    return lvl === 15 ? r15 : null;
+  } catch { return lvl === 15 ? null : null; }
 }
 
 // Affiche un leaderboard dans un conteneur DOM
@@ -587,6 +601,7 @@ let levelStartTime;     // performance.now() au début du niveau
 let levelElapsed = 0;   // temps du niveau en cours
 let totalElapsed = 0;   // temps cumulé des niveaux précédents
 let bestTotal    = null; // meilleur temps total (run complet)
+let bestByLevel  = {};   // meilleur temps NON CUMULÉ par niveau { 1: secs, ... }
 let level    = 1;
 let animId;
 let sinkHole = null;
@@ -1311,15 +1326,13 @@ async function onWin() {
 
   document.getElementById('timer-disp').textContent = totalElapsed.toFixed(1);
 
-  // Sauvegarde silencieuse aux paliers 5 et 10
-  if (level === 5)  saveMilestone(5,  totalElapsed);
-  if (level === 10) saveMilestone(10, totalElapsed);
+  // Sauvegarde silencieuse à chaque niveau (best mondial + leaderboard aux paliers)
+  if (level < MAX_LEVEL) saveLevel(level, levelTime);
 
   if (level >= MAX_LEVEL) {
     // Partie complète — sauvegarde et affichage
     const isRecord = !bestTotal || totalElapsed < bestTotal;
     if (isRecord) bestTotal = totalElapsed;
-    document.getElementById('best-disp').textContent = bestTotal.toFixed(1);
 
     const prevLocal = parseFloat(localStorage.getItem('gravite_best') || 'Infinity');
     if (totalElapsed < prevLocal) localStorage.setItem('gravite_best', totalElapsed.toFixed(3));
@@ -1330,7 +1343,7 @@ async function onWin() {
     releaseWakeLock();
     showScreen('final');
 
-    const r15 = await saveScore(totalElapsed);
+    const r15 = await saveLevel(level, levelTime);
     if (r15) {
       renderLeaderboard(r15, 'final-lb-content');
       const myRank = r15.findIndex(e => e.pseudo === playerPseudo);
@@ -1380,7 +1393,8 @@ function startGame(lvl, keepTotal) {
   generateLevel(level);
   tiltX = tiltY = 0;
 
-  document.getElementById('best-disp').textContent = bestTotal ? bestTotal.toFixed(1) : '—';
+  const bLvl = bestByLevel[level];
+  document.getElementById('best-disp').textContent = bLvl !== undefined ? bLvl.toFixed(1) : '—';
   document.getElementById('timer-disp').textContent = totalElapsed.toFixed(1);
 
   showScreen(null);
@@ -1464,6 +1478,13 @@ if (savedPseudo) {
 loadBinData().then(data => {
   const saved = localStorage.getItem('gravite_pseudo');
   if (saved) checkPseudo(saved);
+  // Pré-remplir bestByLevel depuis les records mondiaux (bests)
+  if (data.bests) {
+    Object.keys(data.bests).forEach(k => { bestByLevel[parseInt(k)] = data.bests[k]; });
+    // Afficher le record du niveau 1 au démarrage
+    const b1 = bestByLevel[1];
+    document.getElementById('best-disp').textContent = b1 ? b1.toFixed(1) : '—';
+  }
 });
 
 // Meilleur temps local dans le HUD
