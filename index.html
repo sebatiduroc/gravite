@@ -1415,7 +1415,7 @@ function initGyro() {
   const handler = (e) => {
     // gamma = left/right tilt, beta = front/back tilt
     const gamma = Math.max(-30, Math.min(30, e.gamma || 0));
-    const beta = Math.max(-30, Math.min(30, e.beta || 0));
+    const beta = Math.max(-30, Math.min(30, (e.beta || 0) - 90));
     tiltX = gamma / 30;
     tiltY = beta  / 30;
   };
